@@ -1,0 +1,30 @@
+# Core LangChain and LLM packages
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-community>=0.1.0
+langchain-aws>=1.0.0
+
+# LangGraph for agent orchestration
+langgraph>=0.1.0
+
+# MCP (Model Context Protocol) support
+langchain-mcp-adapters>=0.1.0
+mcp>=0.1.0
+
+# Search and knowledge tools
+langchain-tavily>=0.1.0
+
+# AWS services
+boto3>=1.26.0
+
+# Data validation
+pydantic>=2.0
+
+# Environment configuration
+python-dotenv>=1.0
+
+# Optional: Development dependencies
+pytest>=7.0
+pytest-asyncio>=0.21.0
+black>=23.0
+mypy>=1.0
