@@ -1,0 +1,173 @@
+from botocore.config import Config
+from langchain.chat_models import init_chat_model
+from langchain_community.agent_toolkits import FileManagementToolkit
+from langchain_tavily import TavilySearch
+from langchain_core.messages import BaseMessage, AIMessage, SystemMessage,ToolMessage, ToolCall
+from langgraph.types import interrupt
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.func import entrypoint, task
+from langgraph.graph import add_messages
+
+# .envから環境変数ファイルを読み出し
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+# ツールの定義
+# Web検索ツール
+web_search = TavilySearch(max_results=2, topic="general")
+
+working_directory = "report"
+# ローカルファイルを扱うツールキット
+file_toolkit = FileManagementToolkit(
+  root_dir=str(working_directory),
+  selected_tools=["write_file"] # フィルの書き込みツール指定
+)
+write_file = file_toolkit.get_tools()[0]
+
+# ツールリスト：個別のツールを列挙（ツールキットではなく個別のツール）
+# FileManagementToolkit から get_tools() でツール一覧を取得
+tools = [web_search, write_file]
+
+# ツール名をキーにしたディクショナリを作成
+# 用途: ツール実行時に「ツール名」から素早くツールを取得するため
+#
+# 変換例:
+#   入力: tools = [Tool(name="search", ...), Tool(name="write_file", ...)]
+#   出力: tool_by_name = {
+#           "search": Tool(name="search", ...),
+#           "write_file": Tool(name="write_file", ...)
+#         }
+#
+# 利点:
+#   - 検索が O(1) で高速（辞書ルックアップ）
+#   - ツール実行ノードで ツール名から直接取得可能
+#   - コード例:
+#       tool = tool_by_name["search"]
+#       result = tool.invoke({"query": "Python"})
+#
+# 別の方法（非効率）:
+#   for tool in tools:
+#       if tool.name == "search":
+#           return tool  # O(n) のループが必要
+#
+# ⚠️ 注意: FileManagementToolkit は name 属性がないため、
+#         get_tools() で個別ツールを取得して tools リストに含める
+tool_by_name = {tool.name: tool for tool in tools}
+
+MODEL_ID = "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+# LLMの初期化
+cfg = Config(
+  read_timeout=300
+)
+llm_with_tools = init_chat_model(
+  model=MODEL_ID,
+  model_provider="bedrock_converse",
+  config=cfg
+).bind_tools(tools)
+
+system_prompt = """
+あなたの責務はユーザーからのリクエストを調査し、調査結果をファイルに出力することです。
+- ユーザーのリクエスト調査にWeb検索が必要であれば、Web検索ツールを使ってください。
+- 必要な情報が集まったと判断したら検索は終了してください。
+- 検索は最大2回までとしてください。
+- ファイル出力はHTML形式(.html)に変換して保存してください。
+  * Web検索が拒否された場合、Web検索を中止してください。
+  * レポート保存を拒否された場合、レポート作成を中止し、内容をユーザーに直接伝えてください。
+"""
+
+# LLMを呼び出すタスク
+@task
+def invoke_llm(messages: list[BaseMessage]) ->AIMessage:
+  response = llm_with_tools.invoke(
+    [SystemMessage(content=system_prompt)] + messages
+  )
+  return response
+
+# ツールを実行するタスク
+@task
+def use_tool(tool_call):
+  tool = tool_by_name[tool_call["name"]]
+  observation = tool.invoke(tool_call["args"])
+
+  return ToolMessage(content=observation, tool_call_id=tool_call["id"])
+
+# ユーザーにツール実行の承認を求める
+def ask_human(tool_call: ToolCall):
+  tool_name = tool_call["name"]
+  tool_args = tool_call["args"]
+  tool_data = {"name": tool_name}
+  if tool_name == web_search.name:
+    args = f'* ツール名\n'
+    args += f' ・{tool_name}\n'
+    args += f'* 引数\n'
+    for key, value in tool_args.items():
+      args += f'  * {key}\n'
+      args += f'    * {value}\n'
+      
+    tool_data["args"] = args
+  elif tool_name == write_file.name:
+    args = f'* ツール名\n'
+    args += f' ・{tool_name}\n'
+    args += f'* 保存ファイル名\n'
+    args += f'  * {tool_args["file_path"]}\n'
+    tool_data["html"] = tool_args["text"]
+  tool_data["args"] = args
+
+  feedback = interrupt(tool_data)
+
+  if feedback == "APPROVE": # ユーザーがツール利用を承認したとき
+    return tool_call
+  
+  return ToolMessage(
+    content="ツール利用が拒否されたため、処理を終了してください。",
+    name=tool_name,
+    tool_call_id=tool_call["id"]
+  )
+
+# チェックポインターの設定
+checkpointer = MemorySaver()
+@entrypoint(checkpointer)
+def agent(messages):
+  # LLMを呼び出し
+  llm_response = invoke_llm(messages).result()
+
+  # ツール呼び出しがある限り繰り返す
+  while True:
+    if not llm_response.tool_calls:
+      break
+
+    approve_tools = []
+    tool_results = []
+
+    # 各ツール呼び出しに対してユーザーの承認を求める
+    for tool_call in llm_response.tool_calls:
+      feedback = ask_human(tool_call)
+      if isinstance(feedback, ToolMessage):
+        tool_results.append(feedback)
+      else:
+        approve_tools.append(feedback)
+
+    # 承認されたツールを実行
+    tool_futures = []
+    for tool_call in approve_tools:
+      future = use_tool(tool_call) # 非同期実行を開始
+      tool_futures.append(future)
+
+    # Future が完了するのを待って結果だけ集める
+    tool_use_results = []
+    for future in tool_futures:
+      result = future.result()  # 完了まで待ち、結果を取得
+      tool_use_results.append(result)
+
+    # メッセージリストに追加
+    messages = add_messages(
+      messages,
+      [llm_response, *tool_use_results, *tool_results]
+    )
+
+    # モデルを再度呼び出し
+    llm_response = invoke_llm(messages).result()
+
+  # 最終結果を返す
+  return llm_response
