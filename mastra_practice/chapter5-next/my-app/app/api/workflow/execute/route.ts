@@ -69,13 +69,15 @@ export async function POST(request: NextRequest){
 
     // result.status: ワークフローの全体的なステータス（"success" or "error"）
     // result.result.success: 最終ステップ（GitHub Issue作成）の成功フラグ
-    if(result.status === "success" && result.result.success) {
+    if(result.status === "success" && result.result?.success) {
       message = "ワークフローが正常に完了しました";
       isSuccess = true;
     } else {
       // エラーメッセージを結合
-      // (result as any): TypeScriptの型チェックを一時的に無効化
-      message = `${(result as any).error} ${(result as any).result.errors}`;
+      // オプショナルチェーン(?.)を使って安全にエラー情報にアクセス
+      const errorMsg = (result as any).error || "エラーが発生しました";
+      const detailErrors = (result as any).result?.errors;
+      message = detailErrors ? `${errorMsg}: ${detailErrors}` : errorMsg;
       isSuccess = false;
     }
 
