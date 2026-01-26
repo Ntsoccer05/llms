@@ -46,7 +46,14 @@ const Page = () => {
 
     try {
       // APIエンドポイントにPOSTリクエストを送信
-      const response = await fetch("/api/workflow/execute", {
+      // const response = await fetch("/api/workflow/execute", {
+      //   method: "POST",
+      //   headers: {
+      //     "Content-Type": "application/json",
+      //   },
+      //   body: JSON.stringify(formData),
+      // });
+      const response = await fetch("/api/workflow/resume", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
