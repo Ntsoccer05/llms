@@ -79,6 +79,7 @@ export const WorkflowContainer = () => {
   const hundleResume = async () => {
     if (!result?.owner) return
     setIsLoading(true);
+    const requestData = {...result, ...formData}
     try{
 
       const response = await fetch("/api/workflow/resume", {
@@ -86,14 +87,14 @@ export const WorkflowContainer = () => {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(result)
+        body: JSON.stringify(requestData)
       })
   
       if(!response.ok) {
         throw new Error('GitHub Issuesの作成に失敗しました')
       }
   
-      const data = response.json();
+      const data = await response.json();
       setResult(data);
     }catch(error) {
       setResult({
@@ -109,6 +110,10 @@ export const WorkflowContainer = () => {
     }
   }
 
+  const hundleCancel = () => {
+    setResult(null);
+  }
+
   return (
     <>
       {/* ワークフローのフォームコンポーネント */}
@@ -120,7 +125,7 @@ export const WorkflowContainer = () => {
       />
 
       {/* ワークフローの結果を表示するコンポーネント */}
-      <WorkflowResults result={result} hundleResume={hundleResume} />
+      <WorkflowResults result={result} hundleResume={hundleResume} hundleCancel={hundleCancel} />
     </>
   );
 };

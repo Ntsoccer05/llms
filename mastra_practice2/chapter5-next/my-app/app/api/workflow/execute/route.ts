@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
  * 3. Mastraワークフローを実行
  * 4. 実行結果をJSON形式で返す
  */
-export async function POST(request: NextRequest){
+export async function POST(request: NextRequest): Promise<NextResponse>{
   try{
     // 【ステップ1】リクエストボディを取得
     // クライアントから送信されたJSONデータを取得（非同期処理なのでawaitが必要）

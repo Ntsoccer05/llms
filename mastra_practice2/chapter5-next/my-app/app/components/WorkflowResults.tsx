@@ -1,13 +1,15 @@
 import { useMemo } from "react";
 import { WorkflowResult } from "@/app/types/workflow";
+import { Button } from "@/app/components/UI/Button";
 
 // WorkflowResultsコンポーネントのProps（引数）の型定義
 interface WorkflowResultsProps {
   result: WorkflowResult | null;
   hundleResume: () => Promise<void>
+  hundleCancel: () => void
 }
 
-export const WorkflowResults = ({result, hundleResume}: WorkflowResultsProps, ) => {
+export const WorkflowResults = ({result, hundleResume, hundleCancel}: WorkflowResultsProps, ) => {
   if (!result) return null;
 
   // 実行中かどうかを判定
@@ -74,9 +76,9 @@ export const WorkflowResults = ({result, hundleResume}: WorkflowResultsProps, ) 
 
       {/* {Human In The Loop} */}
       {isSuspended && (
-        <div class="flex justify-center items-center gap-4">
-          <div class="bg-white">Left</div>
-          <div class="bg-white">Right</div>
+        <div className="flex justify-center items-center gap-4">
+          <Button onClick={hundleResume}>OK</Button>
+          <Button variant="bg-red-500 hover:bg-red-700" onClick={hundleCancel}>キャンセル</Button>
         </div>
       )}
 
@@ -134,6 +136,7 @@ export const WorkflowResults = ({result, hundleResume}: WorkflowResultsProps, ) 
               </div>
             ))}
           </div>
+          <Button variant="bg-blue-500 block hover:bg-blue-700 mx-auto mt-5 text-white" onClick={hundleCancel}>他で実行する</Button>
         </div>
       )}
     </div>
