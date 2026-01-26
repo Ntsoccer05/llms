@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
-
-
+// 認証プロバイダーを追加
+import { Providers } from "@/app/(workspace)/providers"
+import { Navigation } from "@/app/components/Navigation"
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -16,7 +17,10 @@ export default function RootLayout({
   return (
     <html lang="jp">
       <body>
-        {children}
+        <Providers>
+          <Navigation/>
+          {children}
+        </Providers>
       </body>
     </html>
   );
