@@ -1,0 +1,15 @@
+version: "3.8"
+services:
+  backend:
+    container_name: fastapi-llm
+    build:
+      context: ./
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${APP_HOST_PORT}:8000"
+    volumes:
+      - ./app:/app
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1

@@ -1,0 +1,17 @@
+# Web Framework & Server
+fastapi
+uvicorn
+
+# Validation, Settings, Utility
+python-dotenv
+pydantic-settings
+
+Jinja2
+json5
+
+langchain
+langchain-core
+langgraph
+langgraph-checkpoint
+langgraph-prebuilt
+langgraph-sdk
