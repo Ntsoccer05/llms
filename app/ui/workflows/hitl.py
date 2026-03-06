@@ -1,12 +1,18 @@
 """HITL: ページ詳細＋ブランチ名取得。"""
 import fnmatch
+import json
 import os
+import time
 import streamlit as st
 import streamlit.components.v1 as components
 import httpx
 
 from ui.config import get_backend_url
-from ui.notifications import show_desktop_notification
+from ui.notifications import (
+    show_desktop_notification,
+    write_requirement_complete_notify,
+    write_requirement_ready_notify,
+)
 from ui.states import clear_hitl_state
 
 
@@ -103,7 +109,7 @@ def run() -> None:
             )
             st.toast("ブラウザの通知許可ダイアログが表示されたら「許可」を選んでください。", icon="🔔", duration="long")
 
-    st.subheader("1. ブランチ作成の設定（先に入力）")
+    st.subheader("1. ブランチ作成の設定")
     col1, col2 = st.columns(2)
     with col1:
         base_branch_input = st.text_input(
@@ -138,13 +144,20 @@ def run() -> None:
         help="チェックアウトを実行する絶対パス。バックエンドが Docker のときはコンテナ内のパスを指定。未入力時は .env の REPO_PATH を使用。",
     )
 
-    st.caption(f"接続先: `{get_backend_url()}`")
-
-    st.subheader("2. ブランチ名を取得")
     task_id = st.text_input("タスクID", placeholder="例: ES-1", key="hitl_task_id")
-    if st.button("実行（ブランチ名を取得）", key="hitl_run"):
-        if not task_id:
+
+    base_ok = bool((base_branch_input or "main").strip())
+    task_id_ok = bool((task_id or "").strip())
+    repo_path_ok = bool((repo_path_input or "").strip()) or (
+        uploaded_dir is not None and len(uploaded_dir) > 0
+    )
+    run_enabled = base_ok and task_id_ok and repo_path_ok
+
+    if st.button("実行（ブランチ名を取得）", key="hitl_run", disabled=not run_enabled):
+        if not task_id_ok:
             st.warning("タスクIDを入力してください")
+        elif not repo_path_ok:
+            st.warning("「リポジトリのパス」を入力するか「リポジトリのフォルダを選択」でフォルダを選んでください。")
         else:
             step_placeholder = st.empty()
             step_placeholder.info("🔄 バックエンドでページ詳細・ブランチ名を取得しています（他タブで作業して問題ありません）...")
@@ -164,8 +177,11 @@ def run() -> None:
                         st.session_state["hitl_branch_name"] = branch_name
                         st.session_state["hitl_pending_base_branch"] = (base_branch_input or "main").strip()
                         st.session_state["hitl_pending_repo_path"] = (repo_path_input or "").strip()
+                        st.session_state["hitl_markdown_content"] = data.get("markdown_content", "")
                         st.session_state.pop("hitl_result", None)
                         st.session_state.pop("hitl_result_detail", None)
+                        st.session_state.pop("hitl_requirement_md", None)
+                        st.session_state.pop("hitl_requirement_steps", None)
                         show_desktop_notification(
                             "ブランチ名が準備できました",
                             f"{branch_name} を作成してチェックアウトしますか？",
@@ -201,6 +217,37 @@ def run() -> None:
                 approved = st.button("承認", key="hitl_approve", type="primary")
             with col_reject:
                 rejected = st.button("却下", key="hitl_reject")
+            st.caption("デスクトップ通知で「承認」した場合、数秒以内に自動で反映されます。")
+            if st.button("状態を確認", key="hitl_refresh_status"):
+                try:
+                    r = httpx.get(f"{get_backend_url()}/branch/checkout/status", timeout=30.0)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("branch_name") == branch_name and data.get("result"):
+                            st.session_state["hitl_result"] = data["result"]
+                            st.session_state["hitl_result_detail"] = data.get("detail", "")
+                            st.toast("状態を反映しました", icon="✅")
+                            st.rerun()
+                        elif data:
+                            st.info("直近のチェックアウト結果は別ブランチです。")
+                    else:
+                        st.warning("状態の取得に失敗しました。")
+                except Exception as e:
+                    st.warning(f"状態の取得に失敗しました: {e}")
+            else:
+                # 承認・却下をまだ押していない → 数秒ごとに自動でチェックアウト結果を確認
+                time.sleep(3)
+                try:
+                    r = httpx.get(f"{get_backend_url()}/branch/checkout/status", timeout=30.0)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("branch_name") == branch_name and data.get("result"):
+                            st.session_state["hitl_result"] = data["result"]
+                            st.session_state["hitl_result_detail"] = data.get("detail", "")
+                            st.rerun()
+                except Exception:
+                    pass
+                st.rerun()
         else:
             approved = False
             rejected = False
@@ -222,10 +269,12 @@ def run() -> None:
                         st.session_state["hitl_result_detail"] = (
                             f"リモート作成: {res.get('remote_created')}, ローカルチェックアウト: {res.get('local_checked_out')}"
                         )
+                        write_requirement_ready_notify(branch_name, get_backend_url())
                         st.toast("✅ チェックアウト完了", icon="✅")
                     else:
                         st.session_state["hitl_result"] = "checkout_failed"
                         st.session_state["hitl_result_detail"] = cr.text[:300]
+                        write_requirement_ready_notify(branch_name, get_backend_url())
                         st.toast("❌ チェックアウト失敗", icon="❌")
                 except Exception as e:
                     st.session_state["hitl_result"] = "checkout_failed"
@@ -235,6 +284,7 @@ def run() -> None:
         if rejected:
             st.session_state["hitl_result"] = "rejected"
             st.session_state["hitl_result_detail"] = "却下しました"
+            write_requirement_ready_notify(branch_name, get_backend_url())
             st.toast("却下しました", icon="🚫")
             st.rerun()
 
@@ -248,6 +298,141 @@ def run() -> None:
                 st.info(f"🚫 {detail}")
             else:
                 st.error(f"❌ {detail}")
+                st.caption("チェックアウトは行われていませんが、以下で requirement.md の作成・ダウンロードができます。")
+
+            st.divider()
+            st.subheader("requirement.md を生成")
+            ack = st.session_state.get("hitl_requirement_ack")
+            ack_triggered = st.session_state.get("hitl_requirement_ack_triggered")
+            if ack and ack != "approved":
+                st.caption("デスクトップで却下しました。")
+            markdown_content = st.session_state.get("hitl_markdown_content", "")
+            # ボタンクリック、またはデスクトップで承認済みで未生成なら自動で生成を開始
+            run_generate = st.button("requirement.md を生成", key="hitl_gen_req")
+            if not run_generate and ack == "approved" and not ack_triggered and not st.session_state.get("hitl_requirement_md") and markdown_content:
+                run_generate = True
+                st.session_state["hitl_requirement_ack_triggered"] = True
+            if run_generate:
+                if not markdown_content:
+                    st.warning("Notion 本文がありません。最初から「実行（ブランチ名を取得）」を実行してください。")
+                else:
+                    if ack == "approved" and ack_triggered:
+                        st.caption("デスクトップで承認しました。requirement.md を生成しています…")
+                    thinking_placeholder = st.empty()
+                    content_placeholder = st.empty()
+                    thinking_placeholder.caption("LLM の思考過程（ストリーミング）")
+                    thinking_box = st.empty()
+                    content_placeholder.caption("requirement.md 本文（ストリーミング）")
+                    content_box = st.empty()
+                    thinking_text = []
+                    content_text = []
+                    got_done = False
+
+                    def flush_sse(current_event: str | None, data_buffer: list[str]) -> bool:
+                        if not current_event or not data_buffer:
+                            return False
+                        payload = "\n".join(data_buffer)
+                        try:
+                            data = json.loads(payload)
+                        except json.JSONDecodeError:
+                            data = payload
+                        if current_event == "thinking":
+                            thinking_text.append(data if isinstance(data, str) else str(data))
+                            thinking_box.markdown("".join(thinking_text))
+                        elif current_event == "content":
+                            content_text.append(data if isinstance(data, str) else str(data))
+                            content_box.markdown("".join(content_text))
+                        elif current_event == "done":
+                            if isinstance(data, dict):
+                                st.session_state["hitl_requirement_md"] = data.get("requirement_md", "")
+                                st.session_state["hitl_requirement_steps"] = data.get("steps", [])
+                                st.session_state["hitl_requirement_thinking"] = "".join(thinking_text)
+                                write_requirement_complete_notify(branch_name)
+                                return True
+                        elif current_event == "error":
+                            st.error(f"❌ {data}")
+                        return False
+
+                    try:
+                        with httpx.stream(
+                            "POST",
+                            f"{get_backend_url()}/requirement/generate/stream",
+                            json={
+                                "markdown_body": markdown_content,
+                                "branch_name": branch_name,
+                                "repo_path": repo_path_val.strip() or None,
+                            },
+                            timeout=180.0,
+                        ) as r:
+                            if r.status_code != 200:
+                                st.error(f"❌ 生成失敗: {r.text[:300]}")
+                            else:
+                                current_event = None
+                                data_buffer = []
+                                for line in r.iter_lines():
+                                    if line.startswith("event:"):
+                                        if flush_sse(current_event, data_buffer):
+                                            got_done = True
+                                            break
+                                        data_buffer = []
+                                        current_event = line.split(":", 1)[1].strip()
+                                    elif line.startswith("data:"):
+                                        data_buffer.append(line[5:].strip() if len(line) > 5 else "")
+                                    elif line == "":
+                                        if flush_sse(current_event, data_buffer):
+                                            got_done = True
+                                            break
+                                        data_buffer = []
+                                        current_event = None
+                                if not got_done and current_event and data_buffer:
+                                    got_done = flush_sse(current_event, data_buffer)
+                                if got_done:
+                                    st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+            if st.session_state.get("hitl_requirement_md"):
+                st.caption("ブランチ名（ドラッグで選択 → Ctrl+C でコピー）")
+                st.code(branch_name, language="text")
+                st.download_button(
+                    "requirement.md をダウンロード",
+                    data=st.session_state.get("hitl_requirement_md", ""),
+                    file_name="requirement.md",
+                    mime="text/markdown",
+                    key="hitl_dl_req",
+                )
+                thinking_req = st.session_state.get("hitl_requirement_thinking", "")
+                if thinking_req:
+                    with st.expander("LLM の思考過程", expanded=False):
+                        st.markdown(thinking_req)
+                steps_req = st.session_state.get("hitl_requirement_steps") or []
+                if steps_req:
+                    with st.expander("途中の思考過程（参照URL・生成結果）", expanded=False):
+                        for step in steps_req:
+                            st.markdown(f"**{step.get('title', '')}**")
+                            st.text(step.get("content", ""))
+                            st.divider()
+                st.markdown("---")
+                st.caption("requirement.md（選択してコピー）")
+                st.code(st.session_state.get("hitl_requirement_md", ""), language="markdown")
+            if not st.session_state.get("hitl_requirement_ack"):
+                time.sleep(3)
+                try:
+                    r = httpx.get(f"{get_backend_url()}/requirement/ready/ack", timeout=10.0)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("branch_name") == branch_name and data.get("action"):
+                            st.session_state["hitl_requirement_ack"] = data["action"]
+                            st.rerun()
+                except Exception:
+                    pass
+                st.rerun()
             if st.button("クリアして最初から", key="hitl_clear"):
+                try:
+                    base = get_backend_url()
+                    httpx.post(f"{base}/requirement/ready/ack/clear", timeout=5.0)
+                    httpx.post(f"{base}/branch/checkout/status/clear", timeout=5.0)
+                except Exception:
+                    pass
                 clear_hitl_state(st)
                 st.rerun()

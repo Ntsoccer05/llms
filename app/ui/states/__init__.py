@@ -5,6 +5,12 @@ HITL_KEYS = (
     "hitl_pending_repo_path",
     "hitl_result",
     "hitl_result_detail",
+    "hitl_markdown_content",
+    "hitl_requirement_md",
+    "hitl_requirement_steps",
+    "hitl_requirement_thinking",
+    "hitl_requirement_ack",
+    "hitl_requirement_ack_triggered",
 )
 
 

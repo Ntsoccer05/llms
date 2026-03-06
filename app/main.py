@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 import tempfile
@@ -5,6 +6,7 @@ import httpx
 import boto3
 import subprocess
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 from fastapi.concurrency import run_in_threadpool
@@ -18,13 +20,13 @@ from utils.format import (
 )
 from utils.status import check_contains_tag
 from utils.branch_name import build_github_branch_name
+from utils.requirement_generate import generate_requirement_md, stream_requirement_md_async
 
 app = FastAPI()
 
 notion_api_key = get_settings().NOTION_API_KEY
 notion_api_url = get_settings().NOTION_API_URL
 datasource_id = get_settings().NOTION_DATASOURCE_ID
-database_id = get_settings().NOTION_DATABASE_ID
 model_id = get_settings().MODEL_ID
 aws_access_key_id = get_settings().AWS_ACCESS_KEY_ID
 aws_secret_access_key = get_settings().AWS_SECRET_ACCESS_KEY
@@ -45,64 +47,7 @@ headers = {
   'Notion-Version': '2025-09-03'
 }
 
-@app.get("/")
-async def databases():
-  async with httpx.AsyncClient() as client:
-    response = await client.get(
-      f"{notion_api_url}/databases/{database_id}",
-      headers=headers,
-    )
-
-    if response.status_code == 200:
-      return response.json()
-    else:
-      return {"error": response.text}
-    
-@app.get("/datasources")
-async def datasources():
-  async with httpx.AsyncClient() as client:
-    response = await client.get(
-      f"{notion_api_url}/data_sources/{datasource_id}",
-      headers=headers,
-    )
-
-    if response.status_code == 200:
-      return response.json()
-    else:
-      return {"error": response.text}
-
-"""文字列検索"""    
-@app.post("/search")
-async def search(query: str):
-  search_headers = headers.copy()
-  add_header = {
-    "Content-Type": "application/json"
-  }
-  search_headers.update(add_header)
-  payload = {
-    "query": query,
-    "filter": {
-        "property": "object",
-        "value": "page"
-    },
-    "sort": {
-        "timestamp": "last_edited_time",
-        "direction": "ascending"
-    }
-  }
-  async with httpx.AsyncClient() as client:
-    response = await client.post(
-      f"{notion_api_url}/search",
-      headers=search_headers,
-      json=payload
-    )
-
-    if response.status_code == 200:
-      return response.json()
-    else:
-      return {"error": response.text}
-
-"""タスクIDによる検索"""
+"""タスクIDによる検索（/page/detail から利用）"""
 @app.post("/search/datasource")
 async def search_by_datasource(task_id: str):
   number = task_id.replace("ES-", "").replace("ES", "")
@@ -116,7 +61,7 @@ async def search_by_datasource(task_id: str):
     }
   }
   
-  async with httpx.AsyncClient() as client:
+  async with httpx.AsyncClient(timeout=30.0) as client:
     response = await client.post(
       f"{notion_api_url}/data_sources/{datasource_id}/query",
       headers=headers,
@@ -127,29 +72,14 @@ async def search_by_datasource(task_id: str):
       return response.json()
     else:
       return {"error": response.text}
-    
-@app.get("/page")
-async def page(task_id: str):
-  datasource = await search_by_datasource(task_id)
-  page_id = extract_page_id_from_url(datasource["results"][0]['url'])
 
-  async with httpx.AsyncClient() as client:
-    response = await client.get(
-      f"{notion_api_url}/pages/{page_id}",
-      headers=headers
-    )
 
-    if response.status_code == 200:
-      return response.json()
-    else:
-      return {"error": response.text}
-    
 @app.get("/page/detail")
 async def page_detail(task_id: str):
   bug_tag = False
   datasource = await search_by_datasource(task_id)
   page_id = extract_page_id_from_url(datasource["results"][0]['url'])
-  async with httpx.AsyncClient() as client:
+  async with httpx.AsyncClient(timeout=30.0) as client:
     # ページ基本情報を取得
     page_response = await client.get(
       f"{notion_api_url}/pages/{page_id}",
@@ -225,8 +155,74 @@ async def page_detail(task_id: str):
 
 class BranchCheckoutRequest(BaseModel):
   branch_name: str
-  base_branch: str | None = None   # どのブランチをベースに切るか（未指定時は main）
-  repo_path: str | None = None     # ローカルリポジトリのパス（未指定時は config の REPO_PATH）
+  base_branch: str | None = None
+  repo_path: str | None = None
+
+
+class RequirementGenerateRequest(BaseModel):
+  markdown_body: str
+  branch_name: str
+  repo_path: str | None = None
+
+
+# デスクトップ通知の「承認」でチェックアウトした結果を保持（Streamlit の「状態を確認」で取得する）
+_last_checkout_result: dict | None = None
+
+# 「requirement.md を生成しますか？」トーストの承認・却下を保持（Streamlit と連動）
+_last_requirement_ready_ack: dict | None = None
+
+
+class RequirementReadyAckRequest(BaseModel):
+  branch_name: str
+  action: str  # "approved" | "rejected"
+
+
+@app.get("/branch/checkout/status")
+async def branch_checkout_status():
+  """直近のチェックアウト結果を返す。デスクトップ通知で「承認」したあと Streamlit が連動するために使う。"""
+  global _last_checkout_result
+  if _last_checkout_result is None:
+    return {}
+  return _last_checkout_result
+
+
+@app.post("/branch/checkout/status/clear")
+async def branch_checkout_status_clear():
+  """「クリアして最初から」時に Streamlit から呼ばれ、直近のチェックアウト結果を破棄する。"""
+  global _last_checkout_result
+  _last_checkout_result = None
+  return {"ok": True}
+
+
+@app.post("/requirement/ready/ack")
+async def requirement_ready_ack(body: RequirementReadyAckRequest):
+  """デスクトップ通知「requirement.md を生成しますか？」の承認・却下を記録する。Streamlit が GET で取得して連動する。"""
+  global _last_requirement_ready_ack
+  action = (body.action or "").strip().lower()
+  if action not in ("approved", "rejected"):
+    action = "rejected"
+  _last_requirement_ready_ack = {
+    "branch_name": (body.branch_name or "").strip(),
+    "action": action,
+  }
+  return {"ok": True}
+
+
+@app.get("/requirement/ready/ack")
+async def requirement_ready_ack_status():
+  """直近の「requirement.md を生成しますか？」承認・却下を返す。"""
+  global _last_requirement_ready_ack
+  if _last_requirement_ready_ack is None:
+    return {}
+  return _last_requirement_ready_ack
+
+
+@app.post("/requirement/ready/ack/clear")
+async def requirement_ready_ack_clear():
+  """「クリアして最初から」時に Streamlit から呼ばれ、直近の承認・却下を破棄する。"""
+  global _last_requirement_ready_ack
+  _last_requirement_ready_ack = None
+  return {"ok": True}
 
 
 @app.post("/branch/checkout")
@@ -236,6 +232,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
   base_branch: ユーザー指定のベースブランチ（例: main, develop）。未指定時は main。
   repo_path: ユーザー指定のローカルフォルダ。未指定時は config の REPO_PATH。
   """
+  global _last_checkout_result
   branch_name = (body.branch_name or "").strip()
   if not branch_name:
     raise HTTPException(status_code=400, detail="branch_name is required")
@@ -258,7 +255,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
       "Accept": "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
       # ユーザー指定のベースブランチの SHA を取得
       ref_res = await client.get(
         f"https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{base_branch}",
@@ -267,6 +264,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
       if ref_res.status_code != 200:
         msg = f"GitHub ref fetch failed (base_branch={base_branch}): {ref_res.text[:200]}"
         logger.error("branch_checkout: %s", msg)
+        _last_checkout_result = {"branch_name": branch_name, "result": "checkout_failed", "detail": msg[:500]}
         raise HTTPException(status_code=502, detail=msg)
       sha = ref_res.json()["object"]["sha"]
       create_res = await client.post(
@@ -282,6 +280,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
       else:
         msg = f"GitHub create branch failed ({create_res.status_code}): {create_res.text[:300]}"
         logger.error("branch_checkout: %s", msg)
+        _last_checkout_result = {"branch_name": branch_name, "result": "checkout_failed", "detail": msg[:500]}
         raise HTTPException(status_code=502, detail=msg)
 
   # ローカルでチェックアウト（repo_path がある場合）
@@ -379,6 +378,86 @@ async def branch_checkout(body: BranchCheckoutRequest):
       result["local_checked_out"] = True
     except Exception as e:
       logger.exception("branch checkout failed: %s", e)
+      _last_checkout_result = {
+        "branch_name": branch_name,
+        "result": "checkout_failed",
+        "detail": str(e)[:500],
+      }
       raise HTTPException(status_code=502, detail=str(e))
 
+  _last_checkout_result = {
+    "branch_name": branch_name,
+    "result": "checkout_ok",
+    "detail": f"リモート作成: {result.get('remote_created')}, ローカルチェックアウト: {result.get('local_checked_out')}",
+  }
   return result
+
+
+@app.post("/requirement/generate")
+async def requirement_generate(body: RequirementGenerateRequest):
+  """
+  Notion の本文（マークダウン）と対象フォルダを元に LLM で requirement.md を生成する。
+  戻り値: branch_name, requirement_md, steps（アコーディオン用）
+  """
+  markdown_body = (body.markdown_body or "").strip()
+  branch_name = (body.branch_name or "").strip()
+  target_repo_path = (body.repo_path or "").strip() or repo_path
+  if target_repo_path and not os.path.isdir(target_repo_path) and repo_path:
+    target_repo_path = repo_path
+  if target_repo_path and not os.path.isdir(target_repo_path):
+    target_repo_path = ""
+
+  def _generate():
+    return generate_requirement_md(
+      markdown_body,
+      branch_name,
+      target_repo_path or None,
+      model_id,
+      aws_session,
+    )
+
+  try:
+    requirement_md, steps = await run_in_threadpool(_generate)
+    return {
+      "branch_name": branch_name,
+      "requirement_md": requirement_md,
+      "steps": steps,
+    }
+  except Exception as e:
+    logger.exception("requirement generate failed: %s", e)
+    raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/requirement/generate/stream")
+async def requirement_generate_stream(body: RequirementGenerateRequest):
+  """
+  requirement.md をストリーミング生成する。SSE で思考過程（thinking）と本文（content）を送り、最後に done で requirement_md と steps を返す。
+  """
+  markdown_body = (body.markdown_body or "").strip()
+  branch_name = (body.branch_name or "").strip()
+  target_repo_path = (body.repo_path or "").strip() or repo_path
+  if target_repo_path and not os.path.isdir(target_repo_path) and repo_path:
+    target_repo_path = repo_path
+  if target_repo_path and not os.path.isdir(target_repo_path):
+    target_repo_path = ""
+
+  async def sse_events():
+    try:
+      async for kind, data in stream_requirement_md_async(
+        markdown_body,
+        branch_name,
+        target_repo_path or None,
+        model_id,
+        aws_session,
+      ):
+        payload = json.dumps(data, ensure_ascii=False)
+        yield f"event: {kind}\ndata: {payload}\n\n"
+    except Exception as e:
+      logger.exception("requirement generate stream failed: %s", e)
+      yield f"event: error\ndata: {json.dumps(str(e), ensure_ascii=False)}\n\n"
+
+  return StreamingResponse(
+    sse_events(),
+    media_type="text/event-stream",
+    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+  )

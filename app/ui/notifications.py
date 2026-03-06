@@ -10,6 +10,49 @@ import httpx
 from .config import get_backend_url
 
 
+def _notify_dir() -> str:
+    notify_dir = (os.environ.get("NOTIFY_DIR") or "").strip()
+    if not notify_dir and platform.system() == "Windows":
+        _app_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.dirname(os.path.dirname(_app_dir))
+        notify_dir = os.path.join(_project_root, "notify_data")
+    return notify_dir or ""
+
+
+def write_notify_file(notify_type: str, title: str, body: str, **extra) -> None:
+    """NOTIFY_DIR に通知 JSON を書き出す。watcher が win11toast で表示する。"""
+    notify_dir = _notify_dir()
+    if not notify_dir:
+        return
+    try:
+        os.makedirs(notify_dir, exist_ok=True)
+        path = os.path.join(notify_dir, f"notify_{int(time.time() * 1000)}.json")
+        payload = {"type": notify_type, "title": title, "body": body}
+        payload.update(extra)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def write_requirement_ready_notify(branch_name: str = "", backend_url: str = "") -> None:
+    """「requirement.md を生成しますか？」を win11toast 用に NOTIFY_DIR に書き出す。承認・却下を Streamlit と連動させるため branch_name と backend_url を含める。"""
+    write_notify_file(
+        "requirement_ready",
+        "requirement.md を生成しますか？",
+        "ブランチ結果を確認し、requirement.md を生成できます。",
+        branch_name=(branch_name or "").strip(),
+        backend_url=(backend_url or get_backend_url()).strip(),
+    )
+
+
+def write_requirement_complete_notify(branch_name: str = "") -> None:
+    """requirement.md 生成完了を win11toast 用に NOTIFY_DIR に書き出す。"""
+    title = "requirement.md 生成完了"
+    body = "requirement.md を生成しました。画面にて内容確認ください。"
+    write_notify_file("requirement_complete", title, body)
+
+
 def show_desktop_notification(
     title: str,
     body: str,

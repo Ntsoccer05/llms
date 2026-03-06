@@ -61,7 +61,7 @@ def main():
     while True:
         try:
             for name in os.listdir(watch_dir):
-                if name.startswith("notify_") and name.endswith(".json"):
+                if (name.startswith("notify_") or name.startswith("notify_req_")) and name.endswith(".json"):
                     path = os.path.join(watch_dir, name)
                     if path in seen:
                         continue
@@ -74,8 +74,53 @@ def main():
                         backend_url = (data.get("backend_url") or "").strip()
                         base_branch = (data.get("base_branch") or "main").strip()
                         repo_path = (data.get("repo_path") or "").strip()
+                        notify_type = (data.get("type") or "").strip()
 
-                        if backend_url and branch_name:
+                        if notify_type == "requirement_complete":
+                            toast(title, body, duration="long")
+                        elif notify_type == "requirement_ready":
+                            req_branch = (data.get("branch_name") or "").strip()
+                            req_backend = (data.get("backend_url") or "").strip()
+                            if "backend" in req_backend:
+                                req_backend = os.environ.get("WATCHER_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+                            if req_branch and req_backend:
+                                def _req_on_click(req_branch=req_branch, req_backend=req_backend):
+                                    def _click(args):
+                                        a = (args.get("arguments") or "")
+                                        action = "approved" if "承認" in a else "rejected"
+                                        try:
+                                            body_json = json.dumps({"branch_name": req_branch, "action": action}).encode("utf-8")
+                                            req = urllib.request.Request(
+                                                f"{req_backend.rstrip('/')}/requirement/ready/ack",
+                                                data=body_json,
+                                                method="POST",
+                                                headers={"Content-Type": "application/json"},
+                                            )
+                                            urllib.request.urlopen(req, timeout=10)
+                                        except Exception:
+                                            pass
+                                    return _click
+                                toast(
+                                    title,
+                                    body,
+                                    duration="long",
+                                    buttons=[
+                                        {"activationType": "protocol", "arguments": "http:承認", "content": "承認"},
+                                        {"activationType": "protocol", "arguments": "http:却下", "content": "却下"},
+                                    ],
+                                    on_click=_req_on_click(),
+                                )
+                            else:
+                                toast(
+                                    title,
+                                    body,
+                                    duration="long",
+                                    buttons=[
+                                        {"activationType": "protocol", "arguments": "http:承認", "content": "承認"},
+                                        {"activationType": "protocol", "arguments": "http:却下", "content": "却下"},
+                                    ],
+                                )
+                        elif backend_url and branch_name:
                             global _pending_checkout
                             _pending_checkout = {
                                 "backend_url": backend_url,
@@ -138,8 +183,20 @@ def main():
                                 if not ok and last_err:
                                     toast("チェックアウト失敗", last_err[:350], duration="long")
                                     print(f"Checkout error: {last_err}", file=sys.stderr)
+                                    # 失敗時も「requirement.md を生成しますか？」を出す
+                                    try:
+                                        req_path = os.path.join(watch_dir, f"notify_req_{int(time.time() * 1000)}.json")
+                                        with open(req_path, "w", encoding="utf-8") as f:
+                                            json.dump({
+                                                "type": "requirement_ready",
+                                                "title": "requirement.md を生成しますか？",
+                                                "body": "ブランチ結果を確認し、requirement.md を生成できます。",
+                                                "branch_name": p.get("branch_name", ""),
+                                                "backend_url": p.get("backend_url", ""),
+                                            }, f, ensure_ascii=False)
+                                    except Exception:
+                                        pass
 
-                            # 両方のボタンが表示されるよう dict で明示
                             toast(
                                 title,
                                 body,
