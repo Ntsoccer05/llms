@@ -75,7 +75,6 @@ def main():
                         repo_path = (data.get("repo_path") or "").strip()
 
                         if backend_url and branch_name:
-                            # win11toast は buttons に文字列リストを渡すと「承認」「却下」が表示される（dict だと出ない場合あり）
                             global _pending_checkout
                             _pending_checkout = {
                                 "backend_url": backend_url,
@@ -112,11 +111,15 @@ def main():
                                     toast("チェックアウト失敗", str(err)[:100], duration="long")
                                     print(f"Checkout error: {err}", file=sys.stderr)
 
+                            # 両方のボタンが表示されるよう dict で明示
                             toast(
                                 title,
                                 body,
                                 duration="long",
-                                buttons=["承認", "却下"],
+                                buttons=[
+                                    {"activationType": "protocol", "arguments": "http:承認", "content": "承認"},
+                                    {"activationType": "protocol", "arguments": "http:却下", "content": "却下"},
+                                ],
                                 on_click=on_click,
                             )
                         else:

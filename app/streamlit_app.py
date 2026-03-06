@@ -3,6 +3,7 @@ Notion API 操作を Streamlit GUI で実行するアプリ
 途中結果はアコーディオンで表示し、処理中のステップを明示する。
 ブランチ名取得は Human-in-the-loop でデスクトップ通知後にユーザーが承認してチェックアウト可能。
 """
+import fnmatch
 import json
 import os
 import platform
@@ -109,7 +110,17 @@ def show_desktop_notification(
             except Exception:
                 pass
 
-        toast(title, body, duration="long", buttons=["承認", "却下"], on_click=on_toast_click)
+        # 両方のボタンが表示されるよう dict で明示（protocol で arguments がコールバックに渡る）
+        toast(
+            title,
+            body,
+            duration="long",
+            buttons=[
+                {"activationType": "protocol", "arguments": "http:承認", "content": "承認"},
+                {"activationType": "protocol", "arguments": "http:却下", "content": "却下"},
+            ],
+            on_click=on_toast_click,
+        )
         st.toast(body, icon="✅", duration="long")
         return
     except Exception:
@@ -374,13 +385,58 @@ elif operation == "ページ詳細＋ブランチ名取得（Human-in-the-loop�
                 help="Git で管理しているフォルダ内のファイルを選択してください。",
             )
 
+    # .gitignore に含まれるパターンに一致するファイルはアップロード対象から外す
+    if uploaded_dir:
+        try:
+            _ignore_patterns = []
+            for _root in (
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                os.getcwd(),
+                os.path.dirname(os.path.abspath(__file__)),
+            ):
+                _gitignore_path = os.path.join(_root, ".gitignore")
+                if os.path.isfile(_gitignore_path):
+                    with open(_gitignore_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip().split("#")[0].strip()
+                            if line and not line.startswith("!"):
+                                _ignore_patterns.append(line.rstrip("/"))
+                    break
+            # .gitignore が無い場合（Docker 等）は最低限のパターンで除外
+            if not _ignore_patterns:
+                _ignore_patterns = [
+                    ".env", "__pycache__", "*.pyc", "*.pyo", "*.pyd",
+                    ".venv", "venv", "env", "notify_data", ".idea", ".vscode", ".DS_Store", "*.log",
+                ]
+            def _should_ignore(path: str) -> bool:
+                if not path:
+                    return False
+                # C:\Workspace\AI-Agent 選択時は AI-Agent/app/.env や app\.env 形式で渡る
+                p = path.replace("\\", "/").strip("/")
+                parts = [x for x in p.split("/") if x]
+                base = parts[-1] if parts else ""
+                # ファイル名が .env または パスが /.env で終わる場合は常に除外
+                if base == ".env" or p.endswith("/.env"):
+                    return True
+                for pat in _ignore_patterns:
+                    if not pat:
+                        continue
+                    if fnmatch.fnmatch(p, pat) or fnmatch.fnmatch(base, pat):
+                        return True
+                    if pat in parts or pat == base:
+                        return True
+                    if "/" + pat in p or p.endswith("/" + pat) or "\\" + pat in p:
+                        return True
+                return False
+            uploaded_dir = [f for f in uploaded_dir if not _should_ignore(getattr(f, "name", "") or "")]
+        except Exception:
+            pass
+
     # ディレクトリからフォルダ名を取得（アップロードでは絶対パスが取れないため、パス用の入力も用意）
     repo_folder_name = ""
     if uploaded_dir and len(uploaded_dir) > 0:
         first_name = getattr(uploaded_dir[0], "name", "") or ""
         repo_folder_name = first_name.split("/")[0] if "/" in first_name else first_name.split("\\")[0]
-        if repo_folder_name:
-            st.caption(f"選択済みフォルダ: **{repo_folder_name}**（{len(uploaded_dir)} 件）")
 
     repo_path_input = st.text_input(
         "リポジトリのパス（バックエンドから参照できる絶対パス）",
