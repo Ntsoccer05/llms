@@ -150,7 +150,7 @@ def run() -> None:
             step_placeholder.info("🔄 バックエンドでページ詳細・ブランチ名を取得しています（他タブで作業して問題ありません）...")
             try:
                 backend_url = get_backend_url()
-                with httpx.Client(timeout=120.0) as client:
+                with httpx.Client(timeout=180.0) as client:
                     r = client.get(f"{backend_url}/page/detail", params={"task_id": task_id})
                 if r.status_code != 200:
                     step_placeholder.error(f"❌ API エラー: {r.text[:300]}")
@@ -214,7 +214,7 @@ def run() -> None:
                     cr = httpx.post(
                         f"{get_backend_url()}/branch/checkout",
                         json=payload,
-                        timeout=60.0,
+                        timeout=180.0,
                     )
                     if cr.status_code == 200:
                         res = cr.json()

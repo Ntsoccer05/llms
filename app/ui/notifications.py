@@ -43,7 +43,7 @@ def show_desktop_notification(
                         "base_branch": checkout_payload["base_branch"],
                         "repo_path": checkout_payload["repo_path"] or None,
                     },
-                    timeout=60.0,
+                    timeout=180.0,
                 )
             except Exception:
                 pass

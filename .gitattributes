@@ -1,0 +1,2 @@
+# 改行を LF に統一（ホストと Docker 内で差分が出ないようにする）
+* text=auto eol=lf

@@ -114,7 +114,7 @@ def main():
                                             method="POST",
                                             headers={"Content-Type": "application/json"},
                                         )
-                                        with urllib.request.urlopen(req, timeout=60) as resp:
+                                        with urllib.request.urlopen(req, timeout=180) as resp:
                                             if 200 <= resp.status < 300:
                                                 toast("チェックアウト完了", f"{p['branch_name']} を作成してチェックアウトしました。", duration="short")
                                                 ok = True

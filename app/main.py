@@ -320,7 +320,11 @@ async def branch_checkout(body: BranchCheckoutRequest):
           )
           return r.returncode, (r.stdout or "") + (r.stderr or "")
 
-        # 0) origin をトークン付き URL にしておく（fetch で認証を通す）
+        # 0) コンテナ内で改行差を原因とする誤検知を防ぐ（ホストと index の改行を揃える前提）
+        run(["config", "core.autocrlf", "false"], timeout=5)
+        run(["config", "core.eol", "lf"], timeout=5)
+
+        # 1) origin をトークン付き URL にしておく（fetch で認証を通す）
         if token and repo_spec and "/" in repo_spec:
           owner, repo = repo_spec.split("/", 1)
           auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
@@ -328,12 +332,12 @@ async def branch_checkout(body: BranchCheckoutRequest):
           if code0 != 0:
             run(["remote", "add", "origin", auth_url], timeout=5)
 
-        # 1) fetch でリモートの最新を取得
+        # 2) fetch でリモートの最新を取得
         code, out = run(["fetch", "origin"], timeout=60)
         if code != 0:
           raise RuntimeError(f"git fetch failed: {out}")
 
-        # 2) 既にローカルにブランチがある → git checkout のみ
+        # 3) 既にローカルにブランチがある → git checkout のみ
         code, _ = run(["rev-parse", "--verify", "-q", branch_name], timeout=5)
         if code == 0:
           code2, out2 = run(["checkout", branch_name], timeout=15)
@@ -341,7 +345,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
             raise RuntimeError(f"git checkout failed: {out2}")
           return True
 
-        # 3) リモートにブランチがある → git checkout -b で追跡付き作成
+        # 4) リモートにブランチがある → git checkout -b で追跡付き作成
         code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
         if code == 0:
           code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
@@ -349,7 +353,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
             raise RuntimeError(f"git checkout -b failed: {out2}")
           return True
 
-        # 4) どちらにも無い（直前に GitHub で作成した場合など）→ もう一度 fetch してから試す
+        # 5) どちらにも無い（直前に GitHub で作成した場合など）→ もう一度 fetch してから試す
         run(["fetch", "origin", branch_name], timeout=30)
         code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
         if code == 0:
@@ -358,7 +362,7 @@ async def branch_checkout(body: BranchCheckoutRequest):
             raise RuntimeError(f"git checkout -b failed: {out2}")
           return True
 
-        # 5) まだ無い場合は現在 HEAD から -b で作成（フォールバック）
+        # 6) まだ無い場合は現在 HEAD から -b で作成（フォールバック）
         code2, out2 = run(["checkout", "-b", branch_name], timeout=15)
         if code2 != 0:
           raise RuntimeError(f"git checkout -b failed: {out2}")
@@ -375,6 +379,6 @@ async def branch_checkout(body: BranchCheckoutRequest):
       result["local_checked_out"] = True
     except Exception as e:
       logger.exception("branch checkout failed: %s", e)
-      raise HTTPException(status_code=502, detail=str("未コミットの変更があります。コミットまたは stash してください。"))
+      raise HTTPException(status_code=502, detail=str(e))
 
   return result
