@@ -11,7 +11,14 @@ from .config import get_backend_url
 
 
 def _notify_dir() -> str:
-    notify_dir = (os.environ.get("NOTIFY_DIR") or "").strip()
+    notify_dir = ""
+    try:
+        from config import get_settings
+        notify_dir = (get_settings().NOTIFY_DIR or "").strip()
+    except Exception:
+        pass
+    if not notify_dir:
+        notify_dir = (os.environ.get("NOTIFY_DIR") or "").strip()
     if not notify_dir and platform.system() == "Windows":
         _app_dir = os.path.dirname(os.path.abspath(__file__))
         _project_root = os.path.dirname(os.path.dirname(_app_dir))
@@ -118,11 +125,22 @@ def show_desktop_notification(
             payload = {"title": title, "body": body, "branch_name": branch_name}
             payload["base_branch"] = checkout_payload["base_branch"]
             payload["repo_path"] = checkout_payload["repo_path"]
-            _backend_for_notify = (os.environ.get("NOTIFY_BACKEND_URL") or "").strip()
+            _backend_for_notify = ""
+            try:
+                from config import get_settings
+                _backend_for_notify = (get_settings().NOTIFY_BACKEND_URL or "").strip()
+            except Exception:
+                pass
+            if not _backend_for_notify:
+                _backend_for_notify = (os.environ.get("NOTIFY_BACKEND_URL") or "").strip()
             if not _backend_for_notify:
                 _backend_for_notify = checkout_payload.get("backend_url") or get_backend_url()
             if "backend" in (_backend_for_notify or ""):
-                _backend_for_notify = os.environ.get("NOTIFY_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+                try:
+                    from config import get_settings
+                    _backend_for_notify = (get_settings().NOTIFY_BACKEND_URL or "http://localhost:8000").strip() or "http://localhost:8000"
+                except Exception:
+                    _backend_for_notify = os.environ.get("NOTIFY_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000"
             payload["backend_url"] = _backend_for_notify
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False)

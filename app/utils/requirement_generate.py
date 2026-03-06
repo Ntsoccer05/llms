@@ -98,68 +98,67 @@ async def stream_requirement_md_async(
 
     yield "steps", steps
 
-    # --- テスト用: LLM を使わず固定文字で返す ---
-    _template = _load_requirement_template()
-    _fixed_thinking = "（テスト用）雛形とNotion本文を確認し、requirement.md の構成を検討しています。\n（テスト用）固定テキストで requirement.md を返します。"
-    _fixed_md = (_template or "# Requirement\n\n") + "\n\n<!-- テスト用固定 -->\n\n" + (markdown_body[:2000] or "(本文なし)")
-    steps.append({"title": "4. LLM 生成（ストリーミング）", "content": "テスト用固定"})
-    yield "thinking", _fixed_thinking
-    yield "content", _fixed_md
-    steps[-1]["content"] = "完了"
-    yield "done", {"requirement_md": _fixed_md.strip(), "steps": steps}
-    return
+    try:
+        from strands.models import BedrockModel
+    except ImportError:
+        steps.append({"title": "4. LLM 生成", "content": "Strands 未インストールのためスキップ"})
+        requirement_md = _load_requirement_template() or "# Requirement\n\n"
+        requirement_md += "\n\n<!-- Notion 本文を元に手動で作成 -->\n\n" + markdown_body[:8000]
+        yield "done", {"requirement_md": requirement_md, "steps": steps}
+        return
 
-    # --- 以下 LLM 使用（コメントアウトではなく残してあるので必要なら戻せる）---
-    # try:
-    #     from strands.models import BedrockModel
-    # except ImportError:
-    #     steps.append({"title": "4. LLM 生成", "content": "Strands 未インストールのためスキップ"})
-    #     requirement_md = _load_requirement_template() or "# Requirement\n\n"
-    #     requirement_md += "\n\n<!-- Notion 本文を元に手動で作成 -->\n\n" + markdown_body[:8000]
-    #     yield "done", {"requirement_md": requirement_md, "steps": steps}
-    #     return
-    #
-    # if not model_id:
-    #     steps.append({"title": "4. LLM 生成", "content": "MODEL_ID 未設定のためスキップ"})
-    #     template = _load_requirement_template()
-    #     requirement_md = (template or "# Requirement\n\n") + "\n\n" + markdown_body[:8000]
-    #     yield "done", {"requirement_md": requirement_md, "steps": steps}
-    #     return
-    #
-    # try:
-    #     bedrock_model = BedrockModel(
-    #         model_id=model_id,
-    #         boto_session=session,
-    #         max_tokens=max(thinking_budget_tokens + 4096, 8192),
-    #         additional_request_fields={
-    #             "thinking": {"type": "enabled", "budget_tokens": thinking_budget_tokens},
-    #         },
-    #     )
-    #     messages = [{"role": "user", "content": [{"text": prompt}]}]
-    #     requirement_md = ""
-    #     steps.append({"title": "4. LLM 生成（ストリーミング）", "content": "..."})
-    #     async for event in bedrock_model.stream(messages):
-    #         if not event:
-    #             continue
-    #         if "contentBlockDelta" in event:
-    #             delta = event["contentBlockDelta"].get("delta") or {}
-    #             if "reasoningContent" in delta:
-    #                 rc = delta["reasoningContent"]
-    #                 if isinstance(rc, dict) and rc.get("text"):
-    #                     yield "thinking", rc["text"]
-    #             if "text" in delta and delta["text"]:
-    #                 requirement_md += delta["text"]
-    #                 yield "content", delta["text"]
-    #         if "messageStop" in event:
-    #             break
-    #     steps[-1]["content"] = "完了"
-    #     yield "done", {"requirement_md": requirement_md.strip(), "steps": steps}
-    # except Exception as e:
-    #     steps.append({"title": "4. LLM 生成", "content": f"エラー: {e}"})
-    #     template = _load_requirement_template()
-    #     requirement_md = (template or "# Requirement\n\n") + "\n\n" + markdown_body[:8000]
-    #     yield "error", str(e)
-    #     yield "done", {"requirement_md": requirement_md, "steps": steps}
+    if not model_id:
+        steps.append({"title": "4. LLM 生成", "content": "MODEL_ID 未設定のためスキップ"})
+        template = _load_requirement_template()
+        requirement_md = (template or "# Requirement\n\n") + "\n\n" + markdown_body[:8000]
+        yield "done", {"requirement_md": requirement_md, "steps": steps}
+        return
+
+    try:
+        bedrock_model = BedrockModel(
+            model_id=model_id,
+            boto_session=session,
+            max_tokens=max(thinking_budget_tokens + 4096, 8192),
+            additional_request_fields={
+                "thinking": {"type": "enabled", "budget_tokens": thinking_budget_tokens},
+            },
+        )
+        messages = [{"role": "user", "content": [{"text": prompt}]}]
+        requirement_md = ""
+        steps.append({"title": "4. LLM 生成（ストリーミング）", "content": "..."})
+        async for event in bedrock_model.stream(messages):
+            if not event:
+                continue
+            if "contentBlockDelta" in event:
+                delta = event["contentBlockDelta"].get("delta") or {}
+                if "reasoningContent" in delta:
+                    rc = delta["reasoningContent"]
+                    if isinstance(rc, dict) and rc.get("text"):
+                        yield "thinking", rc["text"]
+                if "text" in delta and delta["text"]:
+                    requirement_md += delta["text"]
+                    yield "content", delta["text"]
+            if "messageStop" in event:
+                break
+        steps[-1]["content"] = "完了"
+        yield "done", {"requirement_md": requirement_md.strip(), "steps": steps}
+    except Exception as e:
+        steps.append({"title": "4. LLM 生成", "content": f"エラー: {e}"})
+        template = _load_requirement_template()
+        requirement_md = (template or "# Requirement\n\n") + "\n\n" + markdown_body[:8000]
+        yield "error", str(e)
+        yield "done", {"requirement_md": requirement_md, "steps": steps}
+
+    # --- テスト用: LLM を使わず固定文字で返す（必要なら上記 LLM ブロックをコメントアウトし、以下を有効化）---
+    # _template = _load_requirement_template()
+    # _fixed_thinking = "（テスト用）雛形とNotion本文を確認し、requirement.md の構成を検討しています。\n（テスト用）固定テキストで requirement.md を返します。"
+    # _fixed_md = (_template or "# Requirement\n\n") + "\n\n<!-- テスト用固定 -->\n\n" + (markdown_body[:2000] or "(本文なし)")
+    # steps.append({"title": "4. LLM 生成（ストリーミング）", "content": "テスト用固定"})
+    # yield "thinking", _fixed_thinking
+    # yield "content", _fixed_md
+    # steps[-1]["content"] = "完了"
+    # yield "done", {"requirement_md": _fixed_md.strip(), "steps": steps}
+    # return
 
 
 def generate_requirement_md(
@@ -176,50 +175,49 @@ def generate_requirement_md(
     prompt, steps = _build_prompt_and_steps(markdown_body, repo_path)
     template = _load_requirement_template()
 
-    # --- テスト用: LLM を使わず固定文字で返す ---
-    requirement_md = (template or "# Requirement\n\n") + "\n\n<!-- テスト用固定 -->\n\n" + (markdown_body[:2000] or "(本文なし)")
-    steps.append({"title": "4. LLM 生成", "content": "テスト用固定"})
+    requirement_md = ""
+    try:
+        from strands import Agent
+        from strands.models import BedrockModel
+    except ImportError:
+        steps.append({"title": "4. LLM 生成", "content": "Strands 未インストールのためスキップ"})
+        requirement_md = template or "# Requirement\n\n"
+        requirement_md += "\n\n<!-- Notion 本文を元に手動で作成 -->\n\n" + markdown_body[:8000]
+        return requirement_md, steps
+
+    if not model_id:
+        steps.append({"title": "4. LLM 生成", "content": "MODEL_ID 未設定のためスキップ"})
+        requirement_md = template or "# Requirement\n\n"
+        requirement_md += "\n\n" + markdown_body[:8000]
+        return requirement_md, steps
+
+    try:
+        bedrock_model = BedrockModel(
+            model_id=model_id,
+            boto_session=session,
+            max_tokens=2000,
+        )
+        agent = Agent(model=bedrock_model)
+        response = agent(prompt)
+        text = None
+        if isinstance(response, str):
+            text = response
+        elif hasattr(response, "content"):
+            text = getattr(response, "content", None)
+        elif hasattr(response, "messages") and response.messages:
+            last = response.messages[-1]
+            text = getattr(last, "content", str(last)) if hasattr(last, "content") else str(last)
+        else:
+            text = str(response) if response else None
+        requirement_md = (text or "").strip() or (template + "\n\n" + markdown_body[:8000])
+        steps.append({"title": "4. LLM 生成", "content": "完了"})
+    except Exception as e:
+        steps.append({"title": "4. LLM 生成", "content": f"エラー: {e}"})
+        requirement_md = (template or "# Requirement\n\n") + "\n\n" + markdown_body[:8000]
+
     return requirement_md, steps
 
-    # --- 以下 LLM 使用（コメントアウト。必要なら戻す）---
-    # requirement_md = ""
-    # try:
-    #     from strands import Agent
-    #     from strands.models import BedrockModel
-    # except ImportError:
-    #     steps.append({"title": "4. LLM 生成", "content": "Strands 未インストールのためスキップ"})
-    #     requirement_md = template or "# Requirement\n\n"
-    #     requirement_md += "\n\n<!-- Notion 本文を元に手動で作成 -->\n\n" + markdown_body[:8000]
-    #     return requirement_md, steps
-    #
-    # if not model_id:
-    #     steps.append({"title": "4. LLM 生成", "content": "MODEL_ID 未設定のためスキップ"})
-    #     requirement_md = template or "# Requirement\n\n"
-    #     requirement_md += "\n\n" + markdown_body[:8000]
-    #     return requirement_md, steps
-    #
-    # try:
-    #     bedrock_model = BedrockModel(
-    #         model_id=model_id,
-    #         boto_session=session,
-    #         max_tokens=2000,
-    #     )
-    #     agent = Agent(model=bedrock_model)
-    #     response = agent(prompt)
-    #     text = None
-    #     if isinstance(response, str):
-    #         text = response
-    #     elif hasattr(response, "content"):
-    #         text = getattr(response, "content", None)
-    #     elif hasattr(response, "messages") and response.messages:
-    #         last = response.messages[-1]
-    #         text = getattr(last, "content", str(last)) if hasattr(last, "content") else str(last)
-    #     else:
-    #         text = str(response) if response else None
-    #     requirement_md = (text or "").strip() or (template + "\n\n" + markdown_body[:8000])
-    #     steps.append({"title": "4. LLM 生成", "content": "完了"})
-    # except Exception as e:
-    #     steps.append({"title": "4. LLM 生成", "content": f"エラー: {e}"})
-    #     requirement_md = (template or "# Requirement\n\n") + "\n\n" + markdown_body[:8000]
-    #
+    # --- テスト用: LLM を使わず固定文字で返す（必要なら上記 LLM ブロックをコメントアウトし、以下を有効化）---
+    # requirement_md = (template or "# Requirement\n\n") + "\n\n<!-- テスト用固定 -->\n\n" + (markdown_body[:2000] or "(本文なし)")
+    # steps.append({"title": "4. LLM 生成", "content": "テスト用固定"})
     # return requirement_md, steps

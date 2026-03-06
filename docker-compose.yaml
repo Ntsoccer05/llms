@@ -1,3 +1,10 @@
+# 環境変数（.env またはシェルで上書き可能）
+# - APP_HOST_PORT / STREAMLIT_HOST_PORT: ホスト側のポート（デフォルト 8000 / 8501）
+# - BACKEND_PORT / STREAMLIT_PORT: コンテナ内の待ち受けポート（デフォルト 8000 / 8501）
+# - BACKEND_HOST: Streamlit がバックエンドに接続するときのホスト名（デフォルト backend）
+# - NOTIFY_DIR: 通知 JSON の書き出し先（Streamlit コンテナ内パス、デフォルト /notify）
+# - NOTIFY_BACKEND_URL: watcher がトーストから API を叩くときの URL（デフォルト http://localhost:8000）
+# - APP_ENV: development で uvicorn --reload 有効
 version: "3.8"
 services:
   backend:
@@ -6,17 +13,16 @@ services:
       context: ./
       dockerfile: docker/Dockerfile
     ports:
-      - "${APP_HOST_PORT:-8000}:8000"
+      - "${APP_HOST_PORT:-8000}:${BACKEND_PORT:-8000}"
     volumes:
       - ./app:/app
-      # チェックアウトをホストのリポジトリに反映するため、プロジェクトルートをマウント（.env の REPO_PATH を /workspace にするとここで git が動く）
       - .:/workspace
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-      # 未指定時はコンテナ内の /workspace（＝ホストのプロジェクトルート）で git 実行
-      - REPO_PATH=/workspace
+      - BACKEND_PORT=${BACKEND_PORT:-8000}
+      - REPO_PATH=${REPO_PATH:-/workspace}
 
   streamlit:
     container_name: streamlit-gui
@@ -24,24 +30,18 @@ services:
       context: ./
       dockerfile: docker/Dockerfile
     ports:
-      - "${STREAMLIT_HOST_PORT:-8501}:8501"
+      - "${STREAMLIT_HOST_PORT:-8501}:${STREAMLIT_PORT:-8501}"
     volumes:
       - ./app:/app
-      # ブラウザを閉じても PC に通知を出したい場合: ホストの notify_data をマウントし、Windows で scripts/win_notify_watcher.py を実行する
       - ./notify_data:/notify
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-      # Docker 内では backend サービス名で接続（get_backend_url() が BACKEND_HOST を優先）
-      - BACKEND_HOST=backend
-      # 通知用 JSON の書き出し先（watcher が win11toast で表示）
-      - NOTIFY_DIR=/notify
-      # watcher が Windows から API を叩くときの URL（ホストから見えるアドレス）
-      - NOTIFY_BACKEND_URL=http://localhost:8000
-    entrypoint:
-      - streamlit
-      - run
-      - streamlit_app.py
-      - --server.port=8501
-      - --server.address=0.0.0.0
+      - BACKEND_HOST=${BACKEND_HOST:-backend}
+      - BACKEND_PORT=${BACKEND_PORT:-8000}
+      - NOTIFY_DIR=${NOTIFY_DIR:-/notify}
+      - NOTIFY_BACKEND_URL=${NOTIFY_BACKEND_URL:-http://localhost:8000}
+      - STREAMLIT_PORT=${STREAMLIT_PORT:-8501}
+      - STREAMLIT_ADDRESS=${STREAMLIT_ADDRESS:-0.0.0.0}
+    entrypoint: ["/bin/sh", "-c", "exec streamlit run streamlit_app.py --server.port=$${STREAMLIT_PORT:-8501} --server.address=$${STREAMLIT_ADDRESS:-0.0.0.0}"]
