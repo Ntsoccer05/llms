@@ -17,7 +17,6 @@ from ui.workflows.hitl_helpers import (
 
 
 def run() -> None:
-    st.subheader("ページ詳細＋ブランチ名取得（Human-in-the-loop）")
     st.caption(
         "バックエンド API でページ詳細とブランチ名を取得します。"
         "準備できたら通知し、あなたが「作成してチェックアウト」を選ぶまでブランチは切りません。"
@@ -120,7 +119,8 @@ def run() -> None:
                         st.warning("状態の取得に失敗しました。")
                 except Exception:
                     st.warning("状態の取得に失敗しました。")
-        else:
+        elif not approved and not rejected:
+            # 承認・却下を押していないときだけポーリング（押した場合は下の if approved / if rejected に進む）
             time.sleep(3)
             if poll_checkout_status(branch_name):
                 st.rerun()
@@ -219,11 +219,12 @@ def run() -> None:
         st.caption("requirement.md（選択してコピー）")
         st.code(st.session_state.get("hitl_requirement_md", ""), language="markdown")
 
+    # クリアボタンは常に表示（ack 待ちで rerun する前に描画する）
+    if st.button("クリアして最初から", key="hitl_clear"):
+        clear_backend_state_and_rerun()
+
     if not st.session_state.get("hitl_requirement_ack"):
         time.sleep(3)
         if poll_requirement_ack(branch_name):
             st.rerun()
         st.rerun()
-
-    if st.button("クリアして最初から", key="hitl_clear"):
-        clear_backend_state_and_rerun()
