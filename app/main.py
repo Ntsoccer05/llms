@@ -273,37 +273,52 @@ async def branch_checkout(body: BranchCheckoutRequest):
     result["remote_created"] = True
 
   # ローカルでチェックアウト（repo_path がある場合）
+  # 注意: バックエンドが Docker のときは target_repo_path はコンテナ内のパス。ホストのフォルダで checkout したい場合はバックエンドをローカルで実行するか、コンテナにマウントされたパスを指定する。
   if target_repo_path:
     def _git_checkout():
-      subprocess.run(
-        ["git", "-C", target_repo_path, "fetch", "origin"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-      )
-      r = subprocess.run(
-        ["git", "-C", target_repo_path, "checkout", branch_name],
-        capture_output=True,
-        text=True,
-        timeout=15,
-      )
-      if r.returncode != 0:
-        # リモートに同名ブランチがあれば -b で追跡付き作成
-        r2 = subprocess.run(
-          ["git", "-C", target_repo_path, "checkout", "-b", branch_name, f"origin/{branch_name}"],
+      def run(cmd, timeout=60):
+        r = subprocess.run(
+          ["git", "-C", target_repo_path] + cmd,
           capture_output=True,
           text=True,
-          timeout=15,
+          timeout=timeout,
         )
-        if r2.returncode != 0:
-          r3 = subprocess.run(
-            ["git", "-C", target_repo_path, "checkout", "-b", branch_name],
-            capture_output=True,
-            text=True,
-            timeout=15,
-          )
-          if r3.returncode != 0:
-            raise RuntimeError(r3.stderr or r3.stdout or "git checkout failed")
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+      # 1) fetch でリモートの最新を取得
+      code, out = run(["fetch", "origin"], timeout=60)
+      if code != 0:
+        raise RuntimeError(f"git fetch failed: {out}")
+
+      # 2) 既にローカルにブランチがある → git checkout のみ
+      code, _ = run(["rev-parse", "--verify", "-q", branch_name], timeout=5)
+      if code == 0:
+        code2, out2 = run(["checkout", branch_name], timeout=15)
+        if code2 != 0:
+          raise RuntimeError(f"git checkout failed: {out2}")
+        return True
+
+      # 3) リモートにブランチがある → git checkout -b で追跡付き作成
+      code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
+      if code == 0:
+        code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
+        if code2 != 0:
+          raise RuntimeError(f"git checkout -b failed: {out2}")
+        return True
+
+      # 4) どちらにも無い（直前に GitHub で作成した場合など）→ もう一度 fetch してから試す
+      run(["fetch", "origin", branch_name], timeout=30)
+      code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
+      if code == 0:
+        code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
+        if code2 != 0:
+          raise RuntimeError(f"git checkout -b failed: {out2}")
+        return True
+
+      # 5) まだ無い場合は現在 HEAD から -b で作成（フォールバック）
+      code2, out2 = run(["checkout", "-b", branch_name], timeout=15)
+      if code2 != 0:
+        raise RuntimeError(f"git checkout -b failed: {out2}")
       return True
 
     try:

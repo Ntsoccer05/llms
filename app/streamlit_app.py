@@ -139,7 +139,13 @@ def show_desktop_notification(
             payload = {"title": title, "body": body, "branch_name": branch_name}
             payload["base_branch"] = checkout_payload["base_branch"]
             payload["repo_path"] = checkout_payload["repo_path"]
-            payload["backend_url"] = checkout_payload.get("backend_url") or get_backend_url()
+            # watcher は Windows 上で動くため、Docker の backend ではなくホストから届く URL を使う
+            _backend_for_notify = (os.environ.get("NOTIFY_BACKEND_URL") or "").strip()
+            if not _backend_for_notify:
+                _backend_for_notify = checkout_payload.get("backend_url") or get_backend_url()
+            if "backend" in (_backend_for_notify or ""):
+                _backend_for_notify = os.environ.get("NOTIFY_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+            payload["backend_url"] = _backend_for_notify
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False)
         except Exception:
@@ -342,7 +348,8 @@ elif operation == "ページ詳細＋ブランチ名取得（Human-in-the-loop�
 
 **通知が来ない場合の確認:**  
 ① watcher 起動時に「Notify watcher started」のトーストが 1 回出れば watcher と win11toast は動いています。  
-② **Docker はこのリポジトリのフォルダ**（`notify_data` があるフォルダ）で `docker compose` を実行してください。別の場所から実行すると、コンテナが別の `notify_data` に書き、watcher が監視しているフォルダと一致しません。
+② **Docker はこのリポジトリのフォルダ**（`notify_data` があるフォルダ）で `docker compose` を実行してください。
+③ トーストの「承認」で getaddrinfo failed になる場合: バックエンドのポートが 8000 でないときは、`.env` に `NOTIFY_BACKEND_URL=http://localhost:ポート` を設定してください。
         """)
         st.caption("画面上のトーストやブラウザの「通知の許可」は、ブラウザを開いているとき用の補助です。")
         if st.button("通知の許可をリクエスト（ブラウザ）", key="hitl_notify_permission"):
@@ -442,8 +449,8 @@ elif operation == "ページ詳細＋ブランチ名取得（Human-in-the-loop�
         "リポジトリのパス（バックエンドから参照できる絶対パス）",
         value="",
         key="hitl_repo_path",
-        placeholder="C:\\Workspace\\AI-Agent",
-        help="チェックアウトを実行するサーバー上の絶対パス。未入力の場合は .env の REPO_PATH を使用。",
+        placeholder="C:\\Workspace\\AI-Agent または /app（Docker 時はコンテナ内パス）",
+        help="チェックアウトを実行する絶対パス。バックエンドが Docker のときはコンテナ内のパス（例: /app）を指定し、そのフォルダがホストのリポジトリをマウントしている必要があります。未入力時は .env の REPO_PATH を使用。",
     )
 
     # 接続先表示

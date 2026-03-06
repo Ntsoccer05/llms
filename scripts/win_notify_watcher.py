@@ -85,31 +85,45 @@ def main():
 
                             def on_click(args):
                                 global _pending_checkout
-                                # 文字列ボタンのとき arguments は "http:承認" または "http:却下"
                                 a = (args.get("arguments") or "")
                                 if "承認" not in a:
-                                    return  # 却下の場合は何もしない
+                                    return
                                 p = _pending_checkout
                                 _pending_checkout = None
                                 if not p:
                                     return
-                                try:
-                                    req = urllib.request.Request(
-                                        f"{p['backend_url']}/branch/checkout",
-                                        data=json.dumps({
-                                            "branch_name": p["branch_name"],
-                                            "base_branch": p.get("base_branch") or "main",
-                                            "repo_path": p.get("repo_path") or None,
-                                        }).encode("utf-8"),
-                                        method="POST",
-                                        headers={"Content-Type": "application/json"},
-                                    )
-                                    with urllib.request.urlopen(req, timeout=60) as resp:
-                                        if 200 <= resp.status < 300:
-                                            toast("チェックアウト完了", f"{p['branch_name']} を作成してチェックアウトしました。", duration="short")
-                                except Exception as err:
-                                    toast("チェックアウト失敗", str(err)[:100], duration="long")
-                                    print(f"Checkout error: {err}", file=sys.stderr)
+                                body_json = json.dumps({
+                                    "branch_name": p["branch_name"],
+                                    "base_branch": p.get("base_branch") or "main",
+                                    "repo_path": p.get("repo_path") or None,
+                                }).encode("utf-8")
+                                urls_to_try = [p["backend_url"]]
+                                # Docker の backend は Windows から解決できないので localhost に置き換え
+                                if "backend" in (p.get("backend_url") or ""):
+                                    urls_to_try.insert(0, os.environ.get("WATCHER_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000")
+                                ok = False
+                                last_err = None
+                                for url in urls_to_try:
+                                    if not url:
+                                        continue
+                                    try:
+                                        req = urllib.request.Request(
+                                            f"{url.rstrip('/')}/branch/checkout",
+                                            data=body_json,
+                                            method="POST",
+                                            headers={"Content-Type": "application/json"},
+                                        )
+                                        with urllib.request.urlopen(req, timeout=60) as resp:
+                                            if 200 <= resp.status < 300:
+                                                toast("チェックアウト完了", f"{p['branch_name']} を作成してチェックアウトしました。", duration="short")
+                                                ok = True
+                                                break
+                                    except Exception as err:
+                                        last_err = err
+                                        continue
+                                if not ok and last_err:
+                                    toast("チェックアウト失敗", str(last_err)[:100], duration="long")
+                                    print(f"Checkout error: {last_err}", file=sys.stderr)
 
                             # 両方のボタンが表示されるよう dict で明示
                             toast(

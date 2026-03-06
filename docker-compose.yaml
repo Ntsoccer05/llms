@@ -9,10 +9,14 @@ services:
       - "${APP_HOST_PORT:-8000}:8000"
     volumes:
       - ./app:/app
+      # チェックアウトをホストのリポジトリに反映するため、プロジェクトルートをマウント（.env の REPO_PATH を /workspace にするとここで git が動く）
+      - .:/workspace
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      # 未指定時はコンテナ内の /workspace（＝ホストのプロジェクトルート）で git 実行
+      - REPO_PATH=/workspace
 
   streamlit:
     container_name: streamlit-gui
@@ -33,6 +37,8 @@ services:
       - BACKEND_HOST=backend
       # 通知用 JSON の書き出し先（watcher が win11toast で表示）
       - NOTIFY_DIR=/notify
+      # watcher が Windows から API を叩くときの URL（ホストから見えるアドレス）
+      - NOTIFY_BACKEND_URL=http://localhost:8000
     entrypoint:
       - streamlit
       - run
