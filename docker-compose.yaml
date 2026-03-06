@@ -6,10 +6,36 @@ services:
       context: ./
       dockerfile: docker/Dockerfile
     ports:
-      - "${APP_HOST_PORT}:8000"
+      - "${APP_HOST_PORT:-8000}:8000"
     volumes:
       - ./app:/app
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+
+  streamlit:
+    container_name: streamlit-gui
+    build:
+      context: ./
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${STREAMLIT_HOST_PORT:-8501}:8501"
+    volumes:
+      - ./app:/app
+      # ブラウザを閉じても PC に通知を出したい場合: ホストの notify_data をマウントし、Windows で scripts/win_notify_watcher.py を実行する
+      - ./notify_data:/notify
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Docker 内では backend サービス名で接続（get_backend_url() が BACKEND_HOST を優先）
+      - BACKEND_HOST=backend
+      # 通知用 JSON の書き出し先（watcher が win11toast で表示）
+      - NOTIFY_DIR=/notify
+    entrypoint:
+      - streamlit
+      - run
+      - streamlit_app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0

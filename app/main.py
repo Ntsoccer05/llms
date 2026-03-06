@@ -1,8 +1,18 @@
 import httpx
-from fastapi import FastAPI
+import boto3
+import subprocess
+from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 from config import get_settings
-from utils.format import blocks_to_markdown, extract_page_id_from_url
+from utils.format import (
+  blocks_to_markdown,
+  extract_page_id_from_url,
+  get_task_id_from_page_data,
+  get_task_title_from_page_data,
+)
+from utils.status import check_contains_tag
+from utils.branch_name import build_github_branch_name
 
 app = FastAPI()
 
@@ -10,6 +20,20 @@ notion_api_key = get_settings().NOTION_API_KEY
 notion_api_url = get_settings().NOTION_API_URL
 datasource_id = get_settings().NOTION_DATASOURCE_ID
 database_id = get_settings().NOTION_DATABASE_ID
+model_id = get_settings().MODEL_ID
+aws_access_key_id = get_settings().AWS_ACCESS_KEY_ID
+aws_secret_access_key = get_settings().AWS_SECRET_ACCESS_KEY
+aws_default_region = get_settings().AWS_DEFAULT_REGION
+
+aws_session = boto3.Session(
+  aws_access_key_id=aws_access_key_id,
+  aws_secret_access_key=aws_secret_access_key,
+  region_name=aws_default_region
+)
+
+github_token = get_settings().GITHUB_TOKEN
+github_repo = get_settings().GITHUB_REPO
+repo_path = get_settings().REPO_PATH
 
 headers = {
   'Authorization': f"Bearer {notion_api_key}",
@@ -117,6 +141,7 @@ async def page(task_id: str):
     
 @app.get("/page/detail")
 async def page_detail(task_id: str):
+  bug_tag = False
   datasource = await search_by_datasource(task_id)
   page_id = extract_page_id_from_url(datasource["results"][0]['url'])
   async with httpx.AsyncClient() as client:
@@ -125,55 +150,166 @@ async def page_detail(task_id: str):
       f"{notion_api_url}/pages/{page_id}",
       headers=headers
     )
-    
+
     if page_response.status_code != 200:
       return {"error": page_response.text}
-    
+
     page_data = page_response.json()
-    
+
     # すべてのブロックを取得（ページネーション + 子ブロック対応）
     async def get_blocks_recursive(block_id):
       all_blocks = []
       next_cursor = None
-      
+
       while True:
         params = {}
         if next_cursor:
           params['start_cursor'] = next_cursor
-        
+
         blocks_response = await client.get(
           f"{notion_api_url}/blocks/{block_id}/children",
           headers=headers,
           params=params
         )
 
-        # return blocks_response.json()
-        
         if blocks_response.status_code != 200:
           break
-        
+
         blocks_data = blocks_response.json()
-        
+
         # 各ブロックについて、has_children なら子ブロックも取得
         for block in blocks_data.get("results", []):
           if block.get("has_children"):
             block["children"] = await get_blocks_recursive(block["id"])
           all_blocks.append(block)
-        
+
         if not blocks_data.get("has_more"):
           break
-        
+
         next_cursor = blocks_data.get("next_cursor")
-      
+
       return all_blocks
-    
+
     blocks = await get_blocks_recursive(page_id)
 
-    # # マークダウンに変換
-    # markdown_content = blocks_to_markdown(blocks)
-    
+    # マークダウンに変換
+    markdown_content = blocks_to_markdown(blocks)
+
+    # チェック
+    if check_contains_tag(page_data, "バグ"):
+      bug_tag = True
+
+    # GitHub ブランチ名: bug/{タスクID}/{スラッグ} または feature/{タスクID}/{スラッグ}
+    task_id = get_task_id_from_page_data(page_data)
+    task_title = get_task_title_from_page_data(page_data)
+    branch_name = await run_in_threadpool(
+      build_github_branch_name,
+      task_id,
+      task_title,
+      bug_tag,
+      model_id,
+      aws_session,
+    )
+
     return {
-      # "page": page_data,
-      "blocks": blocks,
-      # "markdown_content": markdown_content
+      "bug_tag": bug_tag,
+      "branch_name": branch_name,
+      "markdown_content": markdown_content,
     }
+
+
+class BranchCheckoutRequest(BaseModel):
+  branch_name: str
+  base_branch: str | None = None   # どのブランチをベースに切るか（未指定時は main）
+  repo_path: str | None = None     # ローカルリポジトリのパス（未指定時は config の REPO_PATH）
+
+
+@app.post("/branch/checkout")
+async def branch_checkout(body: BranchCheckoutRequest):
+  """
+  Human-in-the-loop: 指定ブランチを GitHub に作成し、ローカルでチェックアウトする。
+  base_branch: ユーザー指定のベースブランチ（例: main, develop）。未指定時は main。
+  repo_path: ユーザー指定のローカルフォルダ。未指定時は config の REPO_PATH。
+  """
+  branch_name = (body.branch_name or "").strip()
+  if not branch_name:
+    raise HTTPException(status_code=400, detail="branch_name is required")
+
+  base_branch = (body.base_branch or "").strip() or "main"
+  target_repo_path = (body.repo_path or "").strip() or repo_path
+
+  result = {"branch_name": branch_name, "remote_created": False, "local_checked_out": False}
+
+  # リモートにブランチ作成（GITHUB_TOKEN + GITHUB_REPO がある場合）
+  if github_token and github_repo and "/" in github_repo:
+    owner, repo = github_repo.strip().split("/", 1)
+    gh_headers = {
+      "Authorization": f"Bearer {github_token}",
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient() as client:
+      # ユーザー指定のベースブランチの SHA を取得
+      ref_res = await client.get(
+        f"https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{base_branch}",
+        headers=gh_headers,
+      )
+      if ref_res.status_code != 200:
+        raise HTTPException(
+          status_code=502,
+          detail=f"GitHub ref fetch failed (base_branch={base_branch}): {ref_res.text[:200]}",
+        )
+      sha = ref_res.json()["object"]["sha"]
+      create_res = await client.post(
+        f"https://api.github.com/repos/{owner}/{repo}/git/refs",
+        headers=gh_headers,
+        json={"ref": f"refs/heads/{branch_name}", "sha": sha},
+      )
+      if create_res.status_code not in (200, 201):
+        raise HTTPException(
+          status_code=502,
+          detail=f"GitHub create branch failed: {create_res.text[:200]}",
+        )
+    result["remote_created"] = True
+
+  # ローカルでチェックアウト（repo_path がある場合）
+  if target_repo_path:
+    def _git_checkout():
+      subprocess.run(
+        ["git", "-C", target_repo_path, "fetch", "origin"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+      )
+      r = subprocess.run(
+        ["git", "-C", target_repo_path, "checkout", branch_name],
+        capture_output=True,
+        text=True,
+        timeout=15,
+      )
+      if r.returncode != 0:
+        # リモートに同名ブランチがあれば -b で追跡付き作成
+        r2 = subprocess.run(
+          ["git", "-C", target_repo_path, "checkout", "-b", branch_name, f"origin/{branch_name}"],
+          capture_output=True,
+          text=True,
+          timeout=15,
+        )
+        if r2.returncode != 0:
+          r3 = subprocess.run(
+            ["git", "-C", target_repo_path, "checkout", "-b", branch_name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+          )
+          if r3.returncode != 0:
+            raise RuntimeError(r3.stderr or r3.stdout or "git checkout failed")
+      return True
+
+    try:
+      await run_in_threadpool(_git_checkout)
+      result["local_checked_out"] = True
+    except Exception as e:
+      raise HTTPException(status_code=502, detail=str(e))
+
+  return result
