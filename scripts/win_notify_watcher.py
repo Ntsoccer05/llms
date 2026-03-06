@@ -120,24 +120,23 @@ def main():
                                                 ok = True
                                                 break
                                     except urllib.error.HTTPError as err:
+                                        msg = f"HTTP {err.code}"
                                         try:
                                             body = err.read().decode("utf-8", errors="replace")
-                                            detail = ""
                                             try:
                                                 d = json.loads(body)
-                                                detail = d.get("detail", body)[:200]
+                                                msg = (d.get("detail") or body or msg)[:400]
                                             except Exception:
-                                                detail = body[:200]
-                                            last_err = Exception(f"502: {detail}")
+                                                msg = (body or msg)[:400]
                                         except Exception:
-                                            last_err = err
+                                            pass
+                                        last_err = msg
                                     except Exception as err:
-                                        last_err = err
+                                        last_err = str(err)[:400]
                                     if last_err:
                                         continue
                                 if not ok and last_err:
-                                    msg = str(last_err)[:150]
-                                    toast("チェックアウト失敗", msg, duration="long")
+                                    toast("チェックアウト失敗", last_err[:350], duration="long")
                                     print(f"Checkout error: {last_err}", file=sys.stderr)
 
                             # 両方のボタンが表示されるよう dict で明示
