@@ -105,7 +105,7 @@ def run() -> None:
             approved = st.button("承認", key="hitl_approve", type="primary")
         with col_reject:
             rejected = st.button("却下", key="hitl_reject")
-        st.caption("デスクトップ通知で「承認」した場合、数秒以内に自動で反映されます。")
+        st.caption("デスクトップ通知で「承認」した場合、約2秒ごとに自動で反映されます。")
         if st.button("状態を確認", key="hitl_refresh_status"):
             if poll_checkout_status(branch_name):
                 st.toast("状態を反映しました", icon="✅")
@@ -119,12 +119,18 @@ def run() -> None:
                         st.warning("状態の取得に失敗しました。")
                 except Exception:
                     st.warning("状態の取得に失敗しました。")
-        elif not approved and not rejected:
-            # 承認・却下を押していないときだけポーリング（押した場合は下の if approved / if rejected に進む）
-            time.sleep(3)
-            if poll_checkout_status(branch_name):
+        # デスクトップ通知で承認した場合にバックエンド結果を検知するため、フラグメントでポーリング（ブロックせず約2秒ごとに更新）
+        @st.fragment(run_every=2.0)
+        def _poll_desktop_checkout():
+            if st.session_state.get("hitl_result"):
+                return
+            bn = st.session_state.get("hitl_branch_name")
+            if not bn:
+                return
+            if poll_checkout_status(bn):
                 st.rerun()
-            st.rerun()
+
+        _poll_desktop_checkout()
     else:
         approved = False
         rejected = False
