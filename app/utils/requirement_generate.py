@@ -63,6 +63,7 @@ def _build_prompt_and_steps(
     prompt = f"""以下で与える「雛形」の構成・見出しを維持したまま、Notion タスク本文と対象フォルダ・参照URLを反映して requirement.md を1つ作成してください。
 - 出力は requirement.md の本文のみ（説明やコードブロックの囲みは不要）
 - 雛形のセクション（# Role, # Task, # Input など）は維持し、内容を Notion 本文と参照URLに基づいて具体化すること
+- 雛形中の具体例（例: 週次ニュース調査、report_request_approval 等）はあくまで形式の参考である。Notion タスクが別の用途（Web/LP 開発など）の場合は、そのタスクに合う Role・Task・ツール名・ワークフローに差し替えること
 - 対象フォルダの構成を考慮し、既存コードに沿った要件にすること
 
 ## 雛形（この構成に従う）

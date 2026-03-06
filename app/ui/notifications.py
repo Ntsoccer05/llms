@@ -20,9 +20,13 @@ def _notify_dir() -> str:
     if not notify_dir:
         notify_dir = (os.environ.get("NOTIFY_DIR") or "").strip()
     if not notify_dir and platform.system() == "Windows":
-        _app_dir = os.path.dirname(os.path.abspath(__file__))
-        _project_root = os.path.dirname(os.path.dirname(_app_dir))
+        # __file__ = .../app/ui/notifications.py → リポジトリルートは 3 段上（ui → app → ルート）
+        _path = os.path.abspath(__file__)
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_path)))
         notify_dir = os.path.join(_project_root, "notify_data")
+    # Docker 内で NOTIFY_DIR が空のとき（.env で NOTIFY_DIR= にしている等）は /notify を使う
+    if not notify_dir and os.path.exists("/.dockerenv"):
+        notify_dir = "/notify"
     return notify_dir or ""
 
 
@@ -113,11 +117,7 @@ def show_desktop_notification(
     except Exception:
         pass
 
-    notify_dir = (os.environ.get("NOTIFY_DIR") or "").strip()
-    if not notify_dir and platform.system() == "Windows":
-        _app_dir = os.path.dirname(os.path.abspath(__file__))
-        _project_root = os.path.dirname(os.path.dirname(_app_dir))
-        notify_dir = os.path.join(_project_root, "notify_data")
+    notify_dir = _notify_dir()
     if notify_dir:
         try:
             os.makedirs(notify_dir, exist_ok=True)

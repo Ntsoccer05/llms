@@ -163,6 +163,22 @@ def main():
                                             if 200 <= resp.status < 300:
                                                 toast("チェックアウト完了", f"{p['branch_name']} を作成してチェックアウトしました。", duration="short")
                                                 ok = True
+                                                # 成功時も「requirement.md を生成しますか？」を出す（デスクトップ承認では Streamlit が write_requirement_ready_notify を呼ばないため）
+                                                req_url = url.rstrip("/") if url else (p.get("backend_url") or "")
+                                                if "backend" in req_url:
+                                                    req_url = os.environ.get("WATCHER_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+                                                try:
+                                                    req_path = os.path.join(watch_dir, f"notify_req_{int(time.time() * 1000)}.json")
+                                                    with open(req_path, "w", encoding="utf-8") as f:
+                                                        json.dump({
+                                                            "type": "requirement_ready",
+                                                            "title": "requirement.md を生成しますか？",
+                                                            "body": "ブランチ結果を確認し、requirement.md を生成できます。",
+                                                            "branch_name": p.get("branch_name", ""),
+                                                            "backend_url": req_url,
+                                                        }, f, ensure_ascii=False)
+                                                except Exception:
+                                                    pass
                                                 break
                                     except urllib.error.HTTPError as err:
                                         msg = f"HTTP {err.code}"
