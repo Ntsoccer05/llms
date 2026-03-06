@@ -333,16 +333,6 @@ async def branch_checkout(body: BranchCheckoutRequest):
         if code != 0:
           raise RuntimeError(f"git fetch failed: {out}")
 
-        # 1.5) 追跡中ファイルの未コミット変更があると checkout できないので検出（untracked は無視）
-        code_st, out_st = run(["status", "--porcelain"], timeout=5)
-        if code_st == 0 and out_st.strip():
-          lines = [line for line in out_st.strip().split("\n") if line.strip() and not line.startswith("??")]
-          if lines:
-            files = [line.split(None, 1)[-1].strip() for line in lines]
-            msg = "未コミットの変更があります。コミットまたは stash してください。対象: "
-            msg += ", ".join(files[:10]) + (" ..." if len(files) > 10 else "")
-            raise RuntimeError(msg)
-
         # 2) 既にローカルにブランチがある → git checkout のみ
         code, _ = run(["rev-parse", "--verify", "-q", branch_name], timeout=5)
         if code == 0:
@@ -385,6 +375,6 @@ async def branch_checkout(body: BranchCheckoutRequest):
       result["local_checked_out"] = True
     except Exception as e:
       logger.exception("branch checkout failed: %s", e)
-      raise HTTPException(status_code=502, detail=str(e))
+      raise HTTPException(status_code=502, detail=str("未コミットの変更があります。コミットまたは stash してください。"))
 
   return result
