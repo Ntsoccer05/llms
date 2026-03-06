@@ -337,9 +337,8 @@ async def branch_checkout(body: BranchCheckoutRequest):
         code_st, out_st = run(["status", "--porcelain"], timeout=5)
         if code_st == 0 and out_st.strip():
           files = [line.split(None, 1)[-1].strip() for line in out_st.strip().split("\n") if line.strip()]
-          raise RuntimeError(
-            "未コミットの変更があります。ブランチを切り替える前にコミットまたは stash してください。
-          )
+          msg = "未コミットの変更があります。ブランチを切り替える前にコミットまたは stash してください。"
+          raise RuntimeError(msg)
 
         # 2) 既にローカルにブランチがある → git checkout のみ
         code, _ = run(["rev-parse", "--verify", "-q", branch_name], timeout=5)
