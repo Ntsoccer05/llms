@@ -42,7 +42,8 @@ def _generate_slug_with_strands(task_title: str, model_id: str, session) -> str 
       f"条件: 英小文字とハイフンのみ、スペースなし、30文字以内。説明は不要でスラッグのみ1行で返す。\n\n"
       f"タスクタイトル: {task_title.strip()}"
     )
-    response = agent(prompt)
+    # response = agent(prompt)
+    response = "feature/ES-1/test"
     # Strands の応答: 文字列 / .content / メッセージリスト など
     text = None
     if isinstance(response, str):

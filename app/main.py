@@ -1,7 +1,12 @@
+import os
+import logging
+import tempfile
 import httpx
 import boto3
 import subprocess
 from fastapi import FastAPI, HTTPException
+
+logger = logging.getLogger(__name__)
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from config import get_settings
@@ -237,6 +242,11 @@ async def branch_checkout(body: BranchCheckoutRequest):
 
   base_branch = (body.base_branch or "").strip() or "main"
   target_repo_path = (body.repo_path or "").strip() or repo_path
+  # バックエンドが Docker のとき、渡されたパスがコンテナに無い（例: C:\...）場合は config の REPO_PATH を使う
+  if target_repo_path and not os.path.isdir(target_repo_path) and repo_path:
+    target_repo_path = repo_path
+  if target_repo_path and not os.path.isdir(target_repo_path):
+    target_repo_path = ""
 
   result = {"branch_name": branch_name, "remote_created": False, "local_checked_out": False}
 
@@ -255,76 +265,116 @@ async def branch_checkout(body: BranchCheckoutRequest):
         headers=gh_headers,
       )
       if ref_res.status_code != 200:
-        raise HTTPException(
-          status_code=502,
-          detail=f"GitHub ref fetch failed (base_branch={base_branch}): {ref_res.text[:200]}",
-        )
+        msg = f"GitHub ref fetch failed (base_branch={base_branch}): {ref_res.text[:200]}"
+        logger.error("branch_checkout: %s", msg)
+        raise HTTPException(status_code=502, detail=msg)
       sha = ref_res.json()["object"]["sha"]
       create_res = await client.post(
         f"https://api.github.com/repos/{owner}/{repo}/git/refs",
         headers=gh_headers,
         json={"ref": f"refs/heads/{branch_name}", "sha": sha},
       )
-      if create_res.status_code not in (200, 201):
-        raise HTTPException(
-          status_code=502,
-          detail=f"GitHub create branch failed: {create_res.text[:200]}",
-        )
-    result["remote_created"] = True
+      if create_res.status_code in (200, 201):
+        result["remote_created"] = True
+      elif create_res.status_code == 422:
+        # ブランチが既に存在する場合はそのままローカル checkout へ
+        pass
+      else:
+        msg = f"GitHub create branch failed ({create_res.status_code}): {create_res.text[:300]}"
+        logger.error("branch_checkout: %s", msg)
+        raise HTTPException(status_code=502, detail=msg)
 
   # ローカルでチェックアウト（repo_path がある場合）
   # 注意: バックエンドが Docker のときは target_repo_path はコンテナ内のパス。ホストのフォルダで checkout したい場合はバックエンドをローカルで実行するか、コンテナにマウントされたパスを指定する。
   if target_repo_path:
     def _git_checkout():
-      def run(cmd, timeout=60):
-        r = subprocess.run(
-          ["git", "-C", target_repo_path] + cmd,
-          capture_output=True,
-          text=True,
-          timeout=timeout,
-        )
-        return r.returncode, (r.stdout or "") + (r.stderr or "")
+      if not os.path.isdir(os.path.join(target_repo_path, ".git")):
+        raise RuntimeError(f"Not a git repo: {target_repo_path}")
 
-      # 1) fetch でリモートの最新を取得
-      code, out = run(["fetch", "origin"], timeout=60)
-      if code != 0:
-        raise RuntimeError(f"git fetch failed: {out}")
+      settings = get_settings()
+      token = (settings.GITHUB_TOKEN or "").strip()
+      repo_spec = (settings.GITHUB_REPO or "").strip()
 
-      # 2) 既にローカルにブランチがある → git checkout のみ
-      code, _ = run(["rev-parse", "--verify", "-q", branch_name], timeout=5)
-      if code == 0:
-        code2, out2 = run(["checkout", branch_name], timeout=15)
-        if code2 != 0:
-          raise RuntimeError(f"git checkout failed: {out2}")
-        return True
+      # git 実行時の環境（HTTPS で認証を聞かれないようにする）
+      run_env = os.environ.copy()
+      askpass_script = None
+      if token:
+        fd, askpass_script = tempfile.mkstemp(prefix="git_askpass_", suffix=".sh")
+        os.close(fd)
+        with open(askpass_script, "w") as f:
+          f.write(
+            "#!/bin/sh\n"
+            "case \"$1\" in *[Pp]assword*) echo \"${GITHUB_TOKEN}\";; *) echo \"x-access-token\";; esac\n"
+          )
+        os.chmod(askpass_script, 0o700)
+        run_env["GIT_ASKPASS"] = askpass_script
+        run_env["GITHUB_TOKEN"] = token
+      try:
+        def run(cmd, timeout=60):
+          r = subprocess.run(
+            ["git", "-C", target_repo_path] + cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=run_env,
+          )
+          return r.returncode, (r.stdout or "") + (r.stderr or "")
 
-      # 3) リモートにブランチがある → git checkout -b で追跡付き作成
-      code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
-      if code == 0:
-        code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
+        # 0) origin をトークン付き URL にしておく（fetch で認証を通す）
+        if token and repo_spec and "/" in repo_spec:
+          owner, repo = repo_spec.split("/", 1)
+          auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+          code0, _ = run(["remote", "set-url", "origin", auth_url], timeout=5)
+          if code0 != 0:
+            run(["remote", "add", "origin", auth_url], timeout=5)
+
+        # 1) fetch でリモートの最新を取得
+        code, out = run(["fetch", "origin"], timeout=60)
+        if code != 0:
+          raise RuntimeError(f"git fetch failed: {out}")
+
+        # 2) 既にローカルにブランチがある → git checkout のみ
+        code, _ = run(["rev-parse", "--verify", "-q", branch_name], timeout=5)
+        if code == 0:
+          code2, out2 = run(["checkout", branch_name], timeout=15)
+          if code2 != 0:
+            raise RuntimeError(f"git checkout failed: {out2}")
+          return True
+
+        # 3) リモートにブランチがある → git checkout -b で追跡付き作成
+        code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
+        if code == 0:
+          code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
+          if code2 != 0:
+            raise RuntimeError(f"git checkout -b failed: {out2}")
+          return True
+
+        # 4) どちらにも無い（直前に GitHub で作成した場合など）→ もう一度 fetch してから試す
+        run(["fetch", "origin", branch_name], timeout=30)
+        code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
+        if code == 0:
+          code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
+          if code2 != 0:
+            raise RuntimeError(f"git checkout -b failed: {out2}")
+          return True
+
+        # 5) まだ無い場合は現在 HEAD から -b で作成（フォールバック）
+        code2, out2 = run(["checkout", "-b", branch_name], timeout=15)
         if code2 != 0:
           raise RuntimeError(f"git checkout -b failed: {out2}")
         return True
-
-      # 4) どちらにも無い（直前に GitHub で作成した場合など）→ もう一度 fetch してから試す
-      run(["fetch", "origin", branch_name], timeout=30)
-      code, _ = run(["rev-parse", "--verify", "-q", f"origin/{branch_name}"], timeout=5)
-      if code == 0:
-        code2, out2 = run(["checkout", "-b", branch_name, f"origin/{branch_name}"], timeout=15)
-        if code2 != 0:
-          raise RuntimeError(f"git checkout -b failed: {out2}")
-        return True
-
-      # 5) まだ無い場合は現在 HEAD から -b で作成（フォールバック）
-      code2, out2 = run(["checkout", "-b", branch_name], timeout=15)
-      if code2 != 0:
-        raise RuntimeError(f"git checkout -b failed: {out2}")
-      return True
+      finally:
+        if askpass_script and os.path.isfile(askpass_script):
+          try:
+            os.unlink(askpass_script)
+          except OSError:
+            pass
 
     try:
       await run_in_threadpool(_git_checkout)
       result["local_checked_out"] = True
     except Exception as e:
+      logger.exception("branch checkout failed: %s", e)
       raise HTTPException(status_code=502, detail=str(e))
 
   return result

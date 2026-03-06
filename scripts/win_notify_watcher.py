@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import urllib.request
+import urllib.error
 
 # トーストの「承認」クリック時に API を呼ぶためのペイロード（直近1件、文字列ボタンでは id を渡せないため）
 _pending_checkout = None
@@ -118,11 +119,25 @@ def main():
                                                 toast("チェックアウト完了", f"{p['branch_name']} を作成してチェックアウトしました。", duration="short")
                                                 ok = True
                                                 break
+                                    except urllib.error.HTTPError as err:
+                                        try:
+                                            body = err.read().decode("utf-8", errors="replace")
+                                            detail = ""
+                                            try:
+                                                d = json.loads(body)
+                                                detail = d.get("detail", body)[:200]
+                                            except Exception:
+                                                detail = body[:200]
+                                            last_err = Exception(f"502: {detail}")
+                                        except Exception:
+                                            last_err = err
                                     except Exception as err:
                                         last_err = err
+                                    if last_err:
                                         continue
                                 if not ok and last_err:
-                                    toast("チェックアウト失敗", str(last_err)[:100], duration="long")
+                                    msg = str(last_err)[:150]
+                                    toast("チェックアウト失敗", msg, duration="long")
                                     print(f"Checkout error: {last_err}", file=sys.stderr)
 
                             # 両方のボタンが表示されるよう dict で明示

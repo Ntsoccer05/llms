@@ -24,20 +24,39 @@ from notion_api import (
 from utils.format import blocks_to_markdown, extract_page_id_from_url
 
 
+def _is_likely_docker():
+    """Streamlit が Docker コンテナ内で動いているか（コンテナ内なら backend サービス名で接続する）"""
+    if os.path.exists("/.dockerenv"):
+        return True
+    return os.environ.get("KUBERNETES_SERVICE_HOST") or os.environ.get("CONTAINER") == "true"
+
+
 def get_backend_url():
     """
-    バックエンド URL を取得。Docker では BACKEND_HOST を優先（環境変数を直接参照して確実に取得）。
+    バックエンド URL を取得。
+    Docker 内で動いているときは BACKEND_HOST を優先（http://backend:8000）。
+    ローカル実行時は BACKEND_URL（例: http://localhost:8000）を優先。
     """
-    # 環境変数を直接見る（config より優先して Docker の env を反映）
     host = (os.environ.get("BACKEND_HOST") or "").strip()
+    if not host:
+        try:
+            host = (get_settings().BACKEND_HOST or "").strip()
+        except Exception:
+            pass
+    # Docker 内なら BACKEND_HOST でバックエンドに接続（localhost はコンテナ自身になるため）
+    if _is_likely_docker() and host:
+        return f"http://{host}:8000"
+    url = (os.environ.get("BACKEND_URL") or "").strip()
+    if not url:
+        try:
+            url = (get_settings().BACKEND_URL or "").strip()
+        except Exception:
+            pass
+    if url:
+        return url
     if host:
         return f"http://{host}:8000"
-    try:
-        from config import get_settings
-        url = (get_settings().BACKEND_URL or "").strip() or "http://localhost:8000"
-        return url
-    except Exception:
-        return "http://localhost:8000"
+    return "http://localhost:8000"
 
 st.set_page_config(page_title="Notion API GUI", layout="wide")
 st.title("Notion API 操作 GUI")
@@ -520,9 +539,10 @@ elif operation == "ページ詳細＋ブランチ名取得（Human-in-the-loop�
             except httpx.ConnectError:
                 step_placeholder.error(
                     f"❌ バックエンドに接続できません: {get_backend_url()}\n\n"
-                    "・Docker の場合は `.env` に `BACKEND_HOST=backend` を設定し、"
-                    "`docker compose up -d backend` でバックエンドを起動してください。\n"
-                    "・ローカル実行の場合はバックエンドを起動したうえで、.env の `BACKEND_URL=http://localhost:8000` を確認してください。"
+                    "・**Docker で両方動かす場合**: `docker compose up -d` で backend と streamlit を起動し、"
+                    "`.env` に `BACKEND_HOST=backend` を設定（streamlit 用）。\n\n"
+                    "・**Streamlit だけローカルで動かす場合**: `.env` に `BACKEND_URL=http://localhost:8000` を設定し、"
+                    "バックエンドは `docker compose up -d backend` で起動してください。（BACKEND_URL が優先されます）"
                 )
             except Exception as e:
                 step_placeholder.error(f"❌ {e}")
