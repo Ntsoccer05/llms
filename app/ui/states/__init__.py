@@ -11,6 +11,9 @@ HITL_KEYS = (
     "hitl_requirement_thinking",
     "hitl_requirement_ack",
     "hitl_requirement_ack_triggered",
+    "hitl_available_repos",
+    "hitl_container_repo_path",
+    "hitl_prev_selected_idx",
 )
 
 

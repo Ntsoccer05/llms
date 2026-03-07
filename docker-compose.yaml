@@ -17,12 +17,14 @@ services:
     volumes:
       - ./app:/app
       - .:/workspace
+      - "${HOST_REPO_PATH:-.}:/host_repos"
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - BACKEND_PORT=${BACKEND_PORT:-8000}
       - REPO_PATH=${REPO_PATH:-/workspace}
+      - HOST_REPO_PATH_ON_HOST=${HOST_REPO_PATH:-C:\WorkSpace}
 
   streamlit:
     container_name: streamlit-gui
@@ -44,4 +46,9 @@ services:
       - NOTIFY_BACKEND_URL=${NOTIFY_BACKEND_URL:-http://localhost:8000}
       - STREAMLIT_PORT=${STREAMLIT_PORT:-8501}
       - STREAMLIT_ADDRESS=${STREAMLIT_ADDRESS:-0.0.0.0}
-    entrypoint: ["/bin/sh", "-c", "exec streamlit run streamlit_app.py --server.port=$${STREAMLIT_PORT:-8501} --server.address=$${STREAMLIT_ADDRESS:-0.0.0.0}"]
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "exec streamlit run streamlit_app.py --server.port=$${STREAMLIT_PORT:-8501} --server.address=$${STREAMLIT_ADDRESS:-0.0.0.0}",
+      ]

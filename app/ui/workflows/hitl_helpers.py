@@ -111,6 +111,7 @@ def render_notification_help():
 def fetch_page_detail_and_notify(task_id: str, base_branch_input: str, repo_path_input: str) -> bool:
     """
     バックエンドでページ詳細を取得し、session_state に格納してデスクトップ通知を出す。
+    同じブランチ名の通知は1回だけ送信する。
     成功で True、失敗で False（step_placeholder は呼び出し側で設定すること）。
     """
     backend_url = get_backend_url()
@@ -135,14 +136,38 @@ def fetch_page_detail_and_notify(task_id: str, base_branch_input: str, repo_path
     st.session_state.pop("hitl_result_detail", None)
     st.session_state.pop("hitl_requirement_md", None)
     st.session_state.pop("hitl_requirement_steps", None)
+
+    # ローカル変更をチェック
+    local_changes_msg = ""
+    try:
+        repo_path = st.session_state["hitl_pending_repo_path"]
+        r_changes = httpx.get(
+            f"{backend_url}/branch/local-changes",
+            params={"repo_path": repo_path} if repo_path else {},
+            timeout=10.0,
+        )
+        if r_changes.status_code == 200:
+            changes_data = r_changes.json()
+            if changes_data.get("has_changes"):
+                local_changes_msg = changes_data.get("detail", "")
+                st.session_state["hitl_has_local_changes"] = True
+    except Exception:
+        pass
+
+    # 毎回通知を送信
+    notify_body = f"{branch_name} を作成してチェックアウトしますか？"
+    if local_changes_msg:
+        notify_body += f"\n\n⚠️ {local_changes_msg}"
+
     show_desktop_notification(
         "ブランチ名が準備できました",
-        f"{branch_name} を作成してチェックアウトしますか？",
+        notify_body,
         branch_name,
         base_branch=st.session_state["hitl_pending_base_branch"],
         repo_path=st.session_state["hitl_pending_repo_path"],
-        backend_url=get_backend_url(),
-    )
+            backend_url=get_backend_url(),
+        )
+
     return True
 
 
