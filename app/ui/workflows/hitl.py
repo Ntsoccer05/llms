@@ -74,10 +74,10 @@ def run() -> None:
             try:
                 r = httpx.get(f"{get_backend_url()}/branch/repo/discover", timeout=10.0)
                 if r.status_code == 200:
-                    repos = r.json().get("repositories", [])
+                    repos = r.json().get("repos", [])
                     if repos:
-                        # Git リポジトリのみをフィルタ（.git フォルダを持つもの）
-                        git_repos = [r for r in repos if r.get("is_git", False)]
+                        # Git リポジトリのみをフィルタ（type が git のもの）
+                        git_repos = [r for r in repos if r.get("type") == "git"]
                         if git_repos:
                             st.session_state["hitl_available_repos"] = git_repos
             except Exception:
@@ -136,7 +136,7 @@ def run() -> None:
                 try:
                     r = httpx.get(f"{get_backend_url()}/branch/repo/discover", timeout=10.0)
                     if r.status_code == 200:
-                        repos = r.json().get("repositories", [])
+                        repos = r.json().get("repos", [])
                         if repos:
                             # Git リポジトリのみをフィルタ（.git フォルダを持つもの）
                             git_repos = [r for r in repos if r.get("is_git", False)]
