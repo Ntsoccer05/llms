@@ -90,12 +90,8 @@ def do_local_checkout(target_repo_path: str, branch_name: str) -> None:
         run(["config", "core.autocrlf", "false"], timeout=5)
         run(["config", "core.eol", "lf"], timeout=5)
 
-        if token and repo_spec and "/" in repo_spec:
-            owner, repo = repo_spec.split("/", 1)
-            auth_url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
-            code0, _ = run(["remote", "set-url", "origin", auth_url], timeout=5)
-            if code0 != 0:
-                run(["remote", "add", "origin", auth_url], timeout=5)
+        # ローカルリポジトリの既存リモート設定を使用する（origin を変更しない）
+        # ユーザーが指定したローカルリポジトリが正しく設定されていることを前提
 
         code, out = run(["fetch", "origin"], timeout=60)
         if code != 0:
