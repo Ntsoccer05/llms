@@ -63,7 +63,6 @@ async def branch_checkout(body: BranchCheckoutRequest):
     base_branch: ユーザー指定のベースブランチ（例: main, develop）。未指定時は main。
     repo_path: ユーザー指定のローカルフォルダ。未指定時は config の REPO_PATH。
     """
-    logger.info(f"branch_checkout received body.branch_name={body.branch_name}, body.base_branch={body.base_branch}, body.repo_path={body.repo_path}, body.github_repo={body.github_repo}")
     settings = get_settings()
     branch_name = (body.branch_name or "").strip()
     if not branch_name:
@@ -72,6 +71,18 @@ async def branch_checkout(body: BranchCheckoutRequest):
     base_branch = (body.base_branch or "").strip() or "main"
     repo_path = (settings.REPO_PATH or "").strip()
     target_repo_path = (body.repo_path or "").strip() or repo_path
+
+    # ホスト側パス（C:\WorkSpace\X など）を受け取った場合、コンテナ内パスに変換
+    if target_repo_path and not os.path.isdir(target_repo_path):
+        # Windows パスの場合、フォルダ名を抽出してコンテナ内パスに変換
+        import re
+        match = re.search(r'([^/\\]+)$', target_repo_path)  # 最後のフォルダ名を取得
+        if match:
+            repo_name = match.group(1)
+            container_path = f"/host_repos/{repo_name}"
+            if os.path.isdir(container_path):
+                target_repo_path = container_path
+
     if target_repo_path and not os.path.isdir(target_repo_path) and repo_path:
         target_repo_path = repo_path
     if target_repo_path and not os.path.isdir(target_repo_path):
@@ -82,7 +93,6 @@ async def branch_checkout(body: BranchCheckoutRequest):
     # GitHub リポジトリが設定されているかチェック（ユーザー入力を優先）
     github_token = settings.GITHUB_TOKEN or ""
     github_repo = (body.github_repo or settings.GITHUB_REPO or "").strip()
-    logger.info(f"branch_checkout: body.github_repo={body.github_repo}, settings.GITHUB_REPO={settings.GITHUB_REPO}, final github_repo={github_repo}")
     if github_token and github_repo and "/" in github_repo:
         try:
             remote_created = await create_branch_on_github(

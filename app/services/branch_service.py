@@ -7,7 +7,6 @@ import httpx
 
 from config import get_settings
 
-
 async def create_branch_on_github(
     branch_name: str,
     base_branch: str,
@@ -58,10 +57,8 @@ def do_local_checkout(target_repo_path: str, branch_name: str) -> None:
     """
     if not os.path.isdir(os.path.join(target_repo_path, ".git")):
         raise RuntimeError(f"Not a git repo: {target_repo_path}")
-
     settings = get_settings()
     token = (settings.GITHUB_TOKEN or "").strip()
-    repo_spec = (settings.GITHUB_REPO or "").strip()
 
     run_env = os.environ.copy()
     askpass_script = None
