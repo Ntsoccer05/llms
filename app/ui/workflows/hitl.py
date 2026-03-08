@@ -301,7 +301,7 @@ def run() -> None:
     st.subheader("requirement.md を生成")
     ack = st.session_state.get("hitl_requirement_ack")
     ack_triggered = st.session_state.get("hitl_requirement_ack_triggered")
-    if ack and ack != "approved":
+    if ack and ack == "rejected":
         st.caption("デスクトップで却下しました。")
     markdown_content = st.session_state.get("hitl_markdown_content", "")
     run_generate = st.button("requirement.md を生成", key="hitl_gen_req")
