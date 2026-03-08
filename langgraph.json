@@ -1,0 +1,10 @@
+{
+  "dependencies": ["."],
+  "env": ".env",
+  "graphs": {
+    "agent": {
+      "path": "src.agent.graph:graph",
+      "name": "Agent Graph with Tavily Search and SNS"
+    }
+  }
+}

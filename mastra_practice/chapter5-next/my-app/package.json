@@ -1,0 +1,39 @@
+{
+  "name": "my-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "dev:mastra": "mastra dev"
+  },
+  "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.30",
+    "@aws-amplify/adapter-nextjs": "^1.7.1",
+    "@aws-amplify/ui-react": "^6.13.2",
+    "@aws-sdk/credential-providers": "^3.975.0",
+    "@mastra/core": "^0.24.9",
+    "@mastra/libsql": "^0.16.4",
+    "@mastra/loggers": "^0.10.19",
+    "@mastra/memory": "^0.15.13",
+    "aws-amplify": "^6.16.0",
+    "aws-cdk-lib": "^2.236.0",
+    "mastra": "^0.18.9",
+    "next": "16.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraphについて</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        h3 {
+            color: #7f8c8d;
+        }
+        .section {
+            background-color: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin: 15px 0;
+        }
+        ul {
+            padding-left: 25px;
+        }
+        li {
+            margin: 10px 0;
+        }
+        .feature-box {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .comparison-item {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .comparison-item h3 {
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>📊 LangGraphについて</h1>
+    
+    <div class="section">
+        <h2>LangGraphとは</h2>
+        <p>LangGraphは、<strong>LangChainが開発した、複雑な生成AIエージェント・ワークフローを構築、展開、管理するために設計されたオープンソースのAIエージェント・フレームワーク</strong>です。</p>
+        
+        <div class="highlight">
+            <strong>一言での定義：</strong><br>
+            「複雑な処理の流れをグラフとして設計して制御できるフレームワーク」
+        </div>
+        
+        <p>LangGraphはPythonフレームワークであり、大規模言語モデル(LLM)をスケーラブルかつ効率的に作成、実行、最適化できるようにするツールとライブラリのセットを提供します。</p>
+    </div>
+
+    <div class="section">
+        <h2>主な特徴</h2>
+        
+        <h3>1. グラフベースアーキテクチャ</h3>
+        <div class="feature-box">
+            <ul>
+                <li>AIエージェント・ワークフローのコンポーネント間の複雑な関係をモデル化・管理</li>
+                <li>ノード間の関係を明確に定義することで、意思決定を強化</li>
+                <li>効率を低下させることなくAIワークフローを拡張可能</li>
+            </ul>
+        </div>
+
+        <h3>2. 状態管理と制御</h3>
+        <div class="feature-box">
+            <ul>
+                <li>各ステップを「ノード」として定義可能</li>
+                <li>「状態の遷移」をコントロール可能</li>
+                <li>条件付き遷移や処理の再実行が簡単に実装可能</li>
+                <li>複数のエージェントを定義し、それぞれに特定の役割を持たせられる</li>
+            </ul>
+        </div>
+
+        <h3>3. 柔軟性と拡張性</h3>
+        <div class="feature-box">
+            <ul>
+                <li>オープンソースの性質とモジュール式設計</li>
+                <li>開発者が新しいコンポーネントを統合可能</li>
+                <li>既存のワークフローを適応・カスタマイズ可能</li>
+                <li>ヒューマン・イン・ザ・ループのアプローチを採用</li>
+            </ul>
+        </div>
+
+        <h3>4. 意思決定の強化</h3>
+        <div class="feature-box">
+            <p>過去のアクションとフィードバックを分析することで、より効果的な意思決定システムを構築。LLM分野では、このプロセスは「リフレクション」と呼ばれます。</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>LangGraphの構成要素</h2>
+        <p>LangGraphは以下のような主要な要素で構成されています：</p>
+        <ul>
+            <li><strong>ノード（Node）：</strong>ワークフロー内の個別の処理ステップを表現</li>
+            <li><strong>エッジ（Edge）：</strong>ノード間の関係や遷移経路を定義</li>
+            <li><strong>状態（State）：</strong>ワークフロー全体を通じて管理されるデータ</li>
+            <li><strong>条件分岐：</strong>特定の条件に基づいてワークフローの流れを制御</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>LangGraphの用途</h2>
+        <div class="feature-box">
+            <ul>
+                <li><strong>チャットボット：</strong>複雑な対話フローの構築</li>
+                <li><strong>AI エージェント：</strong>自動意思決定と行動の実行</li>
+                <li><strong>ワークフロー自動化：</strong>複数のステップを含むプロセスの自動化</li>
+                <li><strong>RAGシステム：</strong>検索→生成→出力などの処理フローの制御</li>
+                <li><strong>状態グラフ：</strong>複雑な状態遷移の管理</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>LangGraphとRAGの違い</h2>
+        <div class="comparison">
+            <div class="comparison-item">
+                <h3>RAG（Retrieval-Augmented Generation）</h3>
+                <p><strong>目的：</strong>LLMに不足している知識を外部データベースから補完する</p>
+                <p><strong>焦点：</strong>知識の検索と統合</p>
+            </div>
+            <div class="comparison-item">
+                <h3>LangGraph</h3>
+                <p><strong>目的：</strong>処理の流れ（検索→生成→出力など）をノードとして組み、順序や条件を制御</p>
+                <p><strong>焦点：</strong>ワークフロー設計と制御</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>LangChainとの関係</h2>
+        <p>LangGraphはLangChainの上に構築された「エージェント・オーケストレーション・フレームワーク」です。</p>
+        <ul>
+            <li><strong>LangChain：</strong>LLMを構築・管理するためのPythonフレームワーク</li>
+            <li><strong>LangGraph：</strong>LangChainを基盤として、複雑なエージェント・ワークフローを制御・オーケストレーションするレイヤー</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>LangGraphのメリット</h2>
+        <div class="feature-box">
+            <ul>
+                <li>複雑なAIワークフローを直感的に設計できる</li>
+                <li>処理の流れが可視化でき、デバッグが容易</li>
+                <li>新しい開発者でも舞台裏で何が起こっているかが明確に理解できる</li>
+                <li>スケーラビリティと効率性を両立</li>
+                <li>柔軟な制御フロー（条件分岐、ループなど）が実装可能</li>
+                <li>ヒューマン・イン・ザ・ループの組み込みが容易</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>まとめ</h2>
+        <p>LangGraphは、<strong>複雑なAIエージェント・ワークフローを効率的に構築・管理するための最新のフレームワーク</strong>です。グラフベースのアーキテクチャにより、AIの意思決定プロセスをより明確に制御でき、スケーラビリティを損なわずに複雑な処理を実装できます。</p>
+        <p>特に、複数のステップを含むエージェント、複雑な条件分岐が必要なワークフロー、ヒューマンインタラクションが必要なシステムなどの構築に最適です。</p>
+    </div>
+
+    <footer style="text-align: center; margin-top: 40px; color: #7f8c8d; font-size: 12px;">
+        <p>作成日：<span id="date"></span></p>
+    </footer>
+
+    <script>
+        document.getElementById('date').textContent = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    </script>
+</body>
+</html>
