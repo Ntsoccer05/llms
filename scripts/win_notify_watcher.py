@@ -201,6 +201,9 @@ def main():
                                     print(f"Checkout error: {last_err}", file=sys.stderr)
                                     # 失敗時も「requirement.md を生成しますか？」を出す
                                     try:
+                                        fail_url = (p.get("backend_url") or "").strip()
+                                        if "backend" in fail_url:
+                                            fail_url = os.environ.get("WATCHER_BACKEND_URL", "http://localhost:8000").strip() or "http://localhost:8000"
                                         req_path = os.path.join(watch_dir, f"notify_req_{int(time.time() * 1000)}.json")
                                         with open(req_path, "w", encoding="utf-8") as f:
                                             json.dump({
@@ -208,7 +211,7 @@ def main():
                                                 "title": "requirement.md を生成しますか？",
                                                 "body": "ブランチ結果を確認し、requirement.md を生成できます。",
                                                 "branch_name": p.get("branch_name", ""),
-                                                "backend_url": p.get("backend_url", ""),
+                                                "backend_url": fail_url,
                                             }, f, ensure_ascii=False)
                                     except Exception:
                                         pass
